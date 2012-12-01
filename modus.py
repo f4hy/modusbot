@@ -7,6 +7,7 @@ import sys
 import random
 import math
 
+
 def anglebetween(v1, v2):
     cos = v1.dotProduct(v2) / (v1.length() * v2.length())
     angle = math.acos(cos)
@@ -32,10 +33,15 @@ class ModusCommander(Commander):
         """Use this function to setup your bot before the game starts."""
         self.verbose = True    # display the command descriptions next to the bot labels
 
+        filelogLevel = logging.DEBUG
+        STDlogLevel = logging.WARNING
+
         filehander = self.log.handlers[0]
         stdoutloghandler = logging.StreamHandler(sys.stdout)
         filehander.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        filehander.setLevel(filelogLevel)
         stdoutloghandler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        stdoutloghandler.setLevel(STDlogLevel)
         self.log.addHandler(stdoutloghandler)
 
         self.seenodefenders = True
@@ -82,14 +88,14 @@ class ModusCommander(Commander):
 
         self.needsorders.discard(bot)
         if bot in self.moved_this_turn:
-            print "do not issue order to {}, already issued this turn, passing".format(bot.name)
+            self.log.warn("do not issue order to {}, already issued this turn, passing".format(bot.name))
             return
         self.moved_this_turn.append(bot.name)
         if bot.state is bot.STATE_SHOOTING:
-            print "do not issue order to firing bot {}, passing".format(bot.name)
+            self.log.warn("do not issue order to firing bot {}, passing".format(bot.name))
             return
         if bot.state is bot.STATE_TAKINGORDERS:
-            print "WARNING: reissuing order to {}, {}".format(bot.name, command)
+            self.log.warn("WARNING: reissuing order to {}, {}".format(bot.name, command))
             #return
 
         self.currentcommand[bot] = {"command": command, "target": target, "facingDirection": facingDirection,
@@ -117,7 +123,7 @@ class ModusCommander(Commander):
         return self.game.team.flag.carrier is not None
 
     def respawn(self):
-        print "respawned!"
+        self.log.info("respawned!")
         self.killcount = 0
         self.losscount = 0
         self.dead = []
@@ -140,13 +146,13 @@ class ModusCommander(Commander):
         for group in self.groups.keys():
             self.groups[group] = [bot for bot in self.groups[group] if bot is not bot_to_remove]
         if bot_to_remove.name in self.hunters:
-            print "removing {}".format(bot_to_remove.name)
+            self.log.debug("removing {}".format(bot_to_remove.name))
             del self.hunters[bot_to_remove.name]
             self.needsorders.add(bot_to_remove)
 
     def setnumberofdefenders(self):
         if len(self.enemydefenders) == self.numberofbots - self.killcount:
-            # print "they are full D"
+            self.log.debug("they are full D")
             for d in self.groups["defenders"]:
                 self.giveneworders(d)
             return 0
@@ -169,7 +175,7 @@ class ModusCommander(Commander):
                 self.moved_this_turn.append(closest_to_my_flag.name)
 
     def defend(self, defender_bot):
-        # print "defend()"
+        self.log.debug("defend()")
         primelist = [2, 3, 5, 7, 11]
         flag = self.game.team.flag.position
         mypos = defender_bot.position
@@ -191,10 +197,10 @@ class ModusCommander(Commander):
             self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach')
 
     def aimatenemy(self, defender_bot):
-        # print "aimatenemy()"
+        self.log.debug("aimatenemy()")
         closestattacker = getclosest(defender_bot.position, self.enemyattackers)  # NOQA
         if closestattacker is None:
-            print "closest attacker none!"
+            self.log.error("closest attacker none!")
             exit(0)
         if self.isinFOV(defender_bot, closestattacker.position) and defender_bot in self.groups["aimatenemy"]:
             return
@@ -206,7 +212,7 @@ class ModusCommander(Commander):
             self.groups["aimatenemy"].append(defender_bot)
 
     def eyeonflag(self, watch_bot):
-        # print "eyeonflag()"
+        self.log.debug("eyeonflag()")
         if self.groups["watching"]:
             return
         flag = self.game.team.flag.position
@@ -241,7 +247,7 @@ class ModusCommander(Commander):
             self.approachflag(attack_bot)
 
     def overpowerall(self):
-        print "Overpower go!"
+        self.log.debug("Overpower go!")
         for bot in self.groups["waiting"]:
             self.overpower(bot)
 
@@ -266,18 +272,18 @@ class ModusCommander(Commander):
                 return goal
             else:
                 trialdistance = trialdistance + 0.5
-                print trialdistance
+                self.log.debug("trialdistance %d", trialdistance)
         return self.level.findNearestFreePosition(topos)  # Should never get here
 
     def approachflag(self, attack_bot):
-        # print "approachflag()"
+        self.log.debug("approachflag()")
         enemyFlag = self.game.enemyTeam.flag.position
         mypos = attack_bot.position
         FOV = self.level.FOVangle
         out_of_range = [e.position.distance(mypos) > self.level.firingDistance + 2 for e in self.enemydefenders]
         if all(out_of_range) and len(self.enemydefenders) > 0:
             self.clearfromgroups(attack_bot)
-            print "inch closer {}".format(attack_bot.name)
+            self.log.debug("inch closer {}".format(attack_bot.name))
             if self.groups["waiting"]:
                 goal = getclosest(mypos, self.groups["waiting"]).position
                 self.issuesafe(commands.Attack, attack_bot, goal, lookAt=enemyFlag, description='Join fellow attacker')
@@ -289,26 +295,21 @@ class ModusCommander(Commander):
             return
         for enemy in self.enemydefenders:
             if anglebetween(enemy.facingDirection, mypos - enemy.position) <= FOV:
-                # print "not attacking because of {}".format(enemy.name)
+                self.log.debug("not attacking because of {}".format(enemy.name))
                 if attack_bot not in self.groups["waiting"]:
                     self.issuesafe(commands.Defend, attack_bot, facingDirection=(enemy.position - mypos), description='Cant attack {}'.format(enemy.name))
-                    #print("issuing cant attack",attack_bot.state,attack_bot.STATE_DEFENDING)
                     self.clearfromgroups(attack_bot)
-                    # print "waiting {}".format(attack_bot.name)
+                    self.log.debug("waiting {}".format(attack_bot.name))
                     self.groups["waiting"].append(attack_bot)
 
                 return
         if attack_bot not in self.groups["attackingflag"]:
             self.issuesafe(commands.Attack, attack_bot, enemyFlag, lookAt=enemyFlag, description='Attack enemy flag')
             self.clearfromgroups(attack_bot)
-            # print "attacking flag {}".format(attack_bot.name)
+            self.log.debug("attacking flag {}".format(attack_bot.name))
             self.groups["attackingflag"].append(attack_bot)
             return
-        # print "none of the above {} {}".format(attack_bot.name, attack_bot.state)
         self.clearfromgroups(attack_bot)
-
-        # def hunt(self, hunter_bot):
-    #     enemySpawn = first.midPoint(second)
 
     def getseenenemies(self):
         alivebots = self.game.bots_alive
@@ -333,27 +334,25 @@ class ModusCommander(Commander):
 
         for e in [ev for ev in newevents if e.type == e.TYPE_KILLED]:
             self.dead.append(e.subject)
-            print "{} was killed by {}!".format(e.subject.name, e.instigator.name)
+            if e.subject is None or e.instigator is None:
+                continue
+            self.log.info("{} was killed by {}!".format(e.subject.name, e.instigator.name))
             if e.instigator.team.name == self.game.team.name:
                 self.killcount += 1
 
                 for k, v in list(self.hunters.items()):
                     if e.subject.name == v:
-                        print "removing {} from hunters".format(k)
+                        self.log.debug("removing {} from hunters".format(k))
                         del self.hunters[k]
                         self.needsorders.add(self.game.bots[k])
                         self.clearfromgroups(self.game.bots[k])
             else:
                 self.losscount += 1
-        print "kills: {kill}/{tot}, Losses {loss}/{tot}".format(kill=self.killcount, loss=self.losscount,
-                                                                tot=self.numberofbots)
+        self.log.info("kills: {kill}/{tot}, Losses {loss}/{tot}".format(kill=self.killcount, loss=self.losscount,
+                                                                        tot=self.numberofbots))
 
         for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_PICKEDUP]:
-            print "{} pickedup the flag!".format(e.instigator.name)
-        # print len(self.game.match.combatEvents), len(self.events)
-        # print "events", len(newevents)
-        # print [x.type for x in newevents]
-        # self.events = self.game.match.combatEvents
+            self.log.info("{} pickedup the flag!".format(e.instigator.name))
 
     def checkformovedprey(self):
         for huntername, preyname in self.hunters.items():
@@ -361,7 +360,7 @@ class ModusCommander(Commander):
             prey = self.game.bots[preyname]
             huntersgoal = self.currentcommand[hunter]["target"]
             if huntersgoal.distance(prey.position) > self.level.firingDistance * 2:
-                print "prey {} has moved too far from original chase point of {}".format(preyname, huntername)
+                self.log.warning("prey {} has moved too far from original chase point of {}".format(preyname, huntername))
                 self.giveneworders(hunter)
 
     def checkfordefendingprey(self):
@@ -395,7 +394,7 @@ class ModusCommander(Commander):
         if len(self.groups["waiting"]) > len(self.enemydefenders):
             self.overpowerall()
         elif len(self.groups["waiting"]) > self.numberofbots - self.killcount:
-            print "overpowering because {} > {}-{}" .format(len(self.groups["waiting"]), self.numberofbots, self.killcount)
+            self.log.info("overpowering because {} > {}-{}" .format(len(self.groups["waiting"]), self.numberofbots, self.killcount))
             self.overpowerall()
         else:
             # Attack if one cant see any of us
@@ -429,21 +428,15 @@ class ModusCommander(Commander):
         numenemydefenders = len(self.enemydefenders)
         if numenemydefenders > 0:
             for bot in self.groups["charging"]:
-                # print "numendef > 0"
-                # self.attack(bot)
                 self.giveneworders(bot)
 
         if numenemydefenders > 0:
             for bot in self.groups["attackingflag"]:
-                # print "numendef > 0"
                 self.giveneworders(bot)
-                # self.attack(bot)
-                # self.needsorders(bot)
 
     def reassign_when_flag_dropped(self):
         if not self.captured():
             for bot in self.groups["flagspawn"]:
-                # print "flagspawn"
                 self.clearfromgroups(bot)
                 self.attack(bot)
                 self.moved_this_turn.append(bot.name)
@@ -520,23 +513,23 @@ class ModusCommander(Commander):
         flagScoreLocation = self.game.team.flagScoreLocation
         for bot in list(self.needsorders):
             if bot.flag:
-                print "{} has flag this turn".format(bot.name)
+                self.log.info("{} has flag this turn".format(bot.name))
                 # if a bot has the flag run to the scoring location
                 self.issuesafe(commands.Move, bot, flagScoreLocation, description='Turn in the flag fail')
                 self.clearfromgroups(bot)
                 self.groups["returningflag"].append(bot)
             if bot in self.groups["defenders"]:
-                print "{} is a defender".format(bot.name)
+                self.log.info("{} is a defender".format(bot.name))
                 continue
             else:
-                # print "{} being issued attack".format(bot.name)
+                self.log.debug("{} being issued attack in 'order remaining'".format(bot.name))
                 self.attack(bot)
         if len(self.needsorders) > 0:
-            print "failed to give all orders, should not happen!"
-            print self.groups
+            self.log.critical("failed to give all orders, should not happen!")
+            self.log.critical("groups %s", repr(self.groups))
             for k, v in self.groups.iteritems():
-                print k, [b.name for b in v]
-            print [bot.name for bot in self.needsorders]
+                self.log.critical("group key %s, value %s", k, repr([b.name for b in v]))
+            self.log.critical("needs orders list remaining %s", repr([bot.name for bot in self.needsorders]))
 
     def shutdown(self):
         """Use this function to teardown your bot after the game is over, or perform an
