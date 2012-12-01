@@ -2,9 +2,10 @@
 # implemented by looking at the commander.py in the ./api/ folder.
 from api import Commander
 from api import commands
+import logging
+import sys
 import random
 import math
-
 
 def anglebetween(v1, v2):
     cos = v1.dotProduct(v2) / (v1.length() * v2.length())
@@ -30,6 +31,13 @@ class ModusCommander(Commander):
     def initialize(self):
         """Use this function to setup your bot before the game starts."""
         self.verbose = True    # display the command descriptions next to the bot labels
+
+        filehander = self.log.handlers[0]
+        stdoutloghandler = logging.StreamHandler(sys.stdout)
+        filehander.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        stdoutloghandler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        self.log.addHandler(stdoutloghandler)
+
         self.seenodefenders = True
         self.groups = {"defenders": [], "returningflag": [], "defending": [], "watching": [], "overpower": [],
                        "waiting": [], "charging": [], "attackingflag": [], "aimatenemy": [],
@@ -41,7 +49,7 @@ class ModusCommander(Commander):
         self.timetilnextrespawn = self.game.match.timeToNextRespawn
 
         self.attackcount = 0
-        print "Modusbots are ", [b.name for b in self.game.bots_alive]
+        self.log.info("Modusbots are %s", repr([b.name for b in self.game.bots_alive]))
 
         self.numberofbots = len(self.game.bots_alive)
 
