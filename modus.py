@@ -256,10 +256,16 @@ class GlueballCommander(Commander):
         FOV = self.level.FOVangle
         out_of_range = [e.position.distance(mypos) > self.level.firingDistance + 2 for e in self.enemydefenders]
         if all(out_of_range) and len(self.enemydefenders) > 0:
-            goal = self.towards_require_progress(mypos, enemyFlag, 1.0)
             self.clearfromgroups(attack_bot)
-            self.issuesafe(commands.Attack, attack_bot, goal, lookAt=enemyFlag, description='Inch closer')
-            # print "inch closer {}".format(attack_bot.name)
+            print "inch closer {}".format(attack_bot.name)
+            if self.groups["waiting"]:
+                goal = getclosest(mypos, self.groups["waiting"]).position
+                self.issuesafe(commands.Attack, attack_bot, goal, lookAt=enemyFlag, description='Join fellow attacker')
+            else:
+                safedistance = mypos.distance(getclosest(mypos, self.enemydefenders).position) - self.level.firingDistance
+                distancetogo = safedistance / 2.0 if safedistance / 2.0 > 1.0 else 1.0
+                goal = self.towards_require_progress(mypos, enemyFlag, distance=distancetogo)
+                self.issuesafe(commands.Attack, attack_bot, goal, lookAt=enemyFlag, description='Inch closer')
             return
         for enemy in self.enemydefenders:
             if anglebetween(enemy.facingDirection, mypos - enemy.position) <= FOV:
