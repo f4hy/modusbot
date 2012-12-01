@@ -56,11 +56,13 @@ class ModusCommander(Commander):
         self.dead = []
         self.allbots = self.game.bots.values()
 
-        self.numberofdefenders = 2
+        self.enemyfullD = False
+
+        self.maxnumberofdefenders = 2
         if self.game.bots_alive < 3:
-            self.numberofdefenders = 1
+            self.maxnumberofdefenders = 1
         if self.game.bots_alive < 2:
-            self.numberofdefenders = 0
+            self.maxnumberofdefenders = 0
 
     def issuesafe(self, command, bot, target=None, facingDirection=None, lookAt=None, description=None, group=None):
         if target:
@@ -134,7 +136,17 @@ class ModusCommander(Commander):
             del self.hunters[bot_to_remove.name]
             self.needsorders.add(bot_to_remove)
 
+    def setnumberofdefenders(self):
+        if len(self.enemydefenders) == self.numberofbots - self.killcount:
+            # print "they are full D"
+            for d in self.groups["defenders"]:
+                self.giveneworders(d)
+            return 0
+        else:
+            return self.maxnumberofdefenders
+
     def set_defenders(self):
+        self.numberofdefenders = self.setnumberofdefenders()
         myFlag = self.game.team.flag.position
         if self.needsorders and len(self.groups["defenders"]) < self.numberofdefenders:
             while len(self.groups["defenders"]) < self.numberofdefenders:
@@ -367,7 +379,14 @@ class ModusCommander(Commander):
             self.hunters[bot.name] = closest.name
 
     def try_to_overpower(self):
+        if self.enemyfullD:
+            if len(self.groups["waiting"]) == len(self.alivebots):
+                self.overpowerall()
+            return
         if len(self.groups["waiting"]) > len(self.enemydefenders):
+            self.overpowerall()
+        elif len(self.groups["waiting"]) > self.numberofbots - self.killcount:
+            print "overpowering because {} > {}-{}" .format(len(self.groups["waiting"]), self.numberofbots, self.killcount)
             self.overpowerall()
         else:
             # Attack if one cant see any of us
@@ -390,6 +409,8 @@ class ModusCommander(Commander):
                 self.moved_this_turn.append(bot.name)
 
     def set_flagwatcher(self):
+        if len(self.groups["defending"]) < 1:
+            return
         if len(self.groups["defending"]) == self.numberofdefenders:
             superdefender = self.groups["defending"][0]
             self.eyeonflag(superdefender)
