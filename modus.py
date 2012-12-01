@@ -21,7 +21,7 @@ def getclosest(closest_to, listofthings):
     return None
 
 
-class GlueballCommander(Commander):
+class ModusCommander(Commander):
     """
     Rename and modify this class to create your own commander and add mycmd.Placeholder
     to the execution command you use to run the competition.
@@ -41,7 +41,7 @@ class GlueballCommander(Commander):
         self.timetilnextrespawn = self.game.match.timeToNextRespawn
 
         self.attackcount = 0
-        print "hunters", [b.name for b in self.game.bots_alive]
+        print "Modusbots are ", [b.name for b in self.game.bots_alive]
 
         self.numberofbots = len(self.game.bots_alive)
 
