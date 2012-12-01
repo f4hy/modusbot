@@ -295,6 +295,7 @@ class ModusCommander(Commander):
             self.clearfromgroups(attack_bot)
             # print "attacking flag {}".format(attack_bot.name)
             self.groups["attackingflag"].append(attack_bot)
+            return
         # print "none of the above {} {}".format(attack_bot.name, attack_bot.state)
         self.clearfromgroups(attack_bot)
 
@@ -421,14 +422,15 @@ class ModusCommander(Commander):
         if numenemydefenders > 0:
             for bot in self.groups["charging"]:
                 # print "numendef > 0"
-                self.attack(bot)
-                self.moved_this_turn.append(bot.name)
+                # self.attack(bot)
+                self.giveneworders(bot)
 
         if numenemydefenders > 0:
             for bot in self.groups["attackingflag"]:
                 # print "numendef > 0"
-                self.attack(bot)
-                self.moved_this_turn.append(bot.name)
+                self.giveneworders(bot)
+                # self.attack(bot)
+                # self.needsorders(bot)
 
     def reassign_when_flag_dropped(self):
         if not self.captured():
