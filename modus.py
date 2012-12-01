@@ -324,58 +324,6 @@ class GlueballCommander(Commander):
         # print [x.type for x in newevents]
         # self.events = self.game.match.combatEvents
 
-    def tick(self):
-        """Override this function for your own bots.  Here you can
-        access all the information in self.game, which includes game
-        information, and self.level which includes information about
-        the level."""
-        flagScoreLocation = self.game.team.flagScoreLocation  # NOQA
-        enemyFlag = self.game.enemyTeam.flag.position  # NOQA
-        myFlag = self.game.team.flag.position  # NOQA
-        enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation  # NOQA
-        alivebots = self.game.bots_alive  # NOQA
-
-        self.needsorders = set()
-
-        self.processevents()
-        self.clearthedead()
-
-        if self.game.match.timeToNextRespawn > self.timetilnextrespawn:
-            self.respawn()
-
-        self.timetilnextrespawn = self.game.match.timeToNextRespawn
-
-        self.seenenemies = self.getseenlivingenemies()
-
-        self.enemydefenders = [e for e in self.seenenemies if e.position.distance(enemyFlag) < self.level.firingDistance]
-
-        self.enemyattackers = [e for e in self.seenenemies if e.position.distance(myFlag) < self.level.firingDistance * 2.0]
-
-        self.moved_this_turn = []
-
-        for bot in self.game.bots_available:
-            self.needsorders.add(bot)
-            self.clearfromgroups(bot)
-
-        self.try_to_overpower()
-
-        self.hunt()
-
-        self.react_to_attackers()
-
-        self.set_defenders()
-        self.set_flagwatcher()
-
-        self.react_to_defenders()
-        # Stop attacking flag spawn
-        self.reassign_when_flag_dropped()
-
-        self.order_flag_carrier()
-        # rerun approch on waiting and attacking flag
-        self.order_approachers()
-        # for all bots which aren't currently doing anything
-        self.order_remaining()
-
     def hunt(self):
         prey = [e for e in self.seenenemies if e not in self.enemydefenders]
 
@@ -455,6 +403,58 @@ class GlueballCommander(Commander):
                 self.clearfromgroups(bot)
                 self.groups["returningflag"].append(bot)
                 break
+
+    def tick(self):
+        """Override this function for your own bots.  Here you can
+        access all the information in self.game, which includes game
+        information, and self.level which includes information about
+        the level."""
+        flagScoreLocation = self.game.team.flagScoreLocation  # NOQA
+        enemyFlag = self.game.enemyTeam.flag.position  # NOQA
+        myFlag = self.game.team.flag.position  # NOQA
+        enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation  # NOQA
+        alivebots = self.game.bots_alive  # NOQA
+
+        self.needsorders = set()
+
+        self.processevents()
+        self.clearthedead()
+
+        if self.game.match.timeToNextRespawn > self.timetilnextrespawn:
+            self.respawn()
+
+        self.timetilnextrespawn = self.game.match.timeToNextRespawn
+
+        self.seenenemies = self.getseenlivingenemies()
+
+        self.enemydefenders = [e for e in self.seenenemies if e.position.distance(enemyFlag) < self.level.firingDistance]
+
+        self.enemyattackers = [e for e in self.seenenemies if e.position.distance(myFlag) < self.level.firingDistance * 2.0]
+
+        self.moved_this_turn = []
+
+        for bot in self.game.bots_available:
+            self.needsorders.add(bot)
+            self.clearfromgroups(bot)
+
+        self.try_to_overpower()
+
+        self.hunt()
+
+        self.react_to_attackers()
+
+        self.set_defenders()
+        self.set_flagwatcher()
+
+        self.react_to_defenders()
+        # Stop attacking flag spawn
+        self.reassign_when_flag_dropped()
+
+        self.order_flag_carrier()
+        # rerun approch on waiting and attacking flag
+        self.order_approachers()
+        # for all bots which aren't currently doing anything
+        self.order_remaining()
 
     def order_remaining(self):
         flagScoreLocation = self.game.team.flagScoreLocation
