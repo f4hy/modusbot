@@ -328,11 +328,30 @@ class GlueballCommander(Commander):
         # print [x.type for x in newevents]
         # self.events = self.game.match.combatEvents
 
+    def checkformovedprey(self):
+        for huntername, preyname in self.hunters.items():
+            hunter = self.game.bots[huntername]
+            prey = self.game.bots[preyname]
+            huntersgoal = self.currentcommand[hunter]["target"]
+            if huntersgoal.distance(prey.position) > self.level.firingDistance * 2:
+                print "prey {} has moved too far from original chase point of {}".format(preyname, huntername)
+                self.giveneworders(hunter)
+
+    def checkfordefendingprey(self):
+        for huntername, preyname in self.hunters.items():
+            hunter = self.game.bots[huntername]
+            prey = self.game.bots[preyname]
+            if prey.state == prey.STATE_DEFENDING and self.isinFOV(prey, hunter.position):
+                self.giveneworders(hunter)
+
     def hunt(self):
-        prey = [e for e in self.seenenemies if e not in self.enemydefenders]
+        prey = [e for e in self.seenenemies if e not in self.enemydefenders and e.state != e.STATE_DEFENDING]
 
         if len(prey) < 1:
             return
+
+        self.checkformovedprey()
+        self.checkfordefendingprey()
 
         for bot in self.groups["charging"]:
             closest = getclosest(bot.position, prey)
