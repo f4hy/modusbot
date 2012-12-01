@@ -49,6 +49,7 @@ class GlueballCommander(Commander):
 
         self.timesincelastevent = 0
 
+        self.currentcommand = {b: None for b in self.game.bots_alive}
         self.killcount = 0
         self.losscount = 0
         self.hunters = {}
@@ -80,6 +81,9 @@ class GlueballCommander(Commander):
         if bot.state is bot.STATE_TAKINGORDERS:
             print "WARNING: reissuing order to {}, {}".format(bot.name, command)
             #return
+
+        self.currentcommand[bot] = {"command": command, "target": target, "facingDirection": facingDirection,
+                                    "lookAt": lookAt, "description": description}
 
         if command == commands.Move:
             self.issue(commands.Move, bot, safetarget, description)
