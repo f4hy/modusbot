@@ -51,6 +51,9 @@ class GlueballCommander(Commander):
 
         self.killcount = 0
         self.losscount = 0
+        self.hunters = {}
+        self.dead = []
+        self.allbots = self.game.bots.values()
 
         self.numberofdefenders = 2
         if self.game.bots_alive < 3:
@@ -66,16 +69,18 @@ class GlueballCommander(Commander):
             if bot not in self.groups[group]:
                 self.groups[group].append(bot)
 
+        self.needsorders.discard(bot)
+        if bot in self.moved_this_turn:
+            print "do not issue order to {}, already issued this turn, passing".format(bot.name)
+            return
+        self.moved_this_turn.append(bot.name)
         if bot.state is bot.STATE_SHOOTING:
             print "do not issue order to firing bot {}, passing".format(bot.name)
             return
         if bot.state is bot.STATE_TAKINGORDERS:
             print "WARNING: reissuing order to {}, {}".format(bot.name, command)
             #return
-        if bot in self.moved_this_turn:
-            print "do not issue order to {}, already issued this turn, passing".format(bot.name)
-            return
-        self.moved_this_turn.append(bot.name)
+
         if command == commands.Move:
             self.issue(commands.Move, bot, safetarget, description)
         elif command == commands.Charge:
@@ -101,6 +106,7 @@ class GlueballCommander(Commander):
         print "respawned!"
         self.killcount = 0
         self.losscount = 0
+        self.dead = []
         pass
 
     def clearthedead(self):
@@ -108,25 +114,34 @@ class GlueballCommander(Commander):
         alivebots = self.game.bots_alive
         for g in self.groups.keys():
             self.groups[g] = [bot for bot in self.groups[g] if bot in alivebots]
+        for deadbot in [bot for bot in self.allbots if bot.health < 1 and bot.seenlast > 0]:
+            self.clearfromgroups(deadbot)
+
+    def giveneworders(self, bot):
+        self.clearfromgroups(bot)
+        self.needsorders.add(bot)
 
     def clearfromgroups(self, bot_to_remove):
         """ remove bot from all groups"""
         for group in self.groups.keys():
             self.groups[group] = [bot for bot in self.groups[group] if bot is not bot_to_remove]
+        if bot_to_remove.name in self.hunters:
+            print "removing {}".format(bot_to_remove.name)
+            del self.hunters[bot_to_remove.name]
+            self.needsorders.add(bot_to_remove)
 
     def set_defenders(self):
-        availablebots = self.game.bots_available
         myFlag = self.game.team.flag.position
-        if availablebots and len(self.groups["defenders"]) < self.numberofdefenders:
+        if self.needsorders and len(self.groups["defenders"]) < self.numberofdefenders:
             while len(self.groups["defenders"]) < self.numberofdefenders:
-                potentialdefenders = [b for b in availablebots if b not in self.groups["defenders"]]
+                potentialdefenders = [b for b in self.needsorders if b not in self.groups["defenders"]]
                 if not potentialdefenders:
                     break
                 _, closest_to_my_flag = sorted([(x.position.distance(myFlag), x) for x in potentialdefenders])[0]
 
                 self.defend(closest_to_my_flag)
                 self.groups["defenders"].append(closest_to_my_flag)
-                self.game.bots_available.remove(closest_to_my_flag)
+                self.needsorders.discard(closest_to_my_flag)
                 self.moved_this_turn.append(closest_to_my_flag.name)
 
     def defend(self, defender_bot):
@@ -176,8 +191,6 @@ class GlueballCommander(Commander):
         self.groups["watching"].append(watch_bot)
 
     def attack(self, attack_bot):
-        # print "attack()", self.attackcount
-        # self.attackcount = self.attackcount + 1
         enemyFlag = self.game.enemyTeam.flag.position
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation
         mypos = attack_bot.position
@@ -282,17 +295,23 @@ class GlueballCommander(Commander):
         return set(livingenemies)
 
     def processevents(self):
-        # print self.game.match.timePassed
-        # print [x.time for x in self.game.match.combatEvents]
         newevents = [e for e in self.game.match.combatEvents if e.time > self.timesincelastevent]
         if len(newevents) < 1:
             return              # do nothing if no new events
         self.timesincelastevent = max([x.time for x in self.game.match.combatEvents])
 
         for e in [ev for ev in newevents if e.type == e.TYPE_KILLED]:
+            self.dead.append(e.subject)
             print "{} was killed by {}!".format(e.subject.name, e.instigator.name)
             if e.instigator.team.name == self.game.team.name:
                 self.killcount += 1
+
+                for k, v in list(self.hunters.items()):
+                    if e.subject.name == v:
+                        print "removing {} from hunters".format(k)
+                        del self.hunters[k]
+                        self.needsorders.add(self.game.bots[k])
+                        self.clearfromgroups(self.game.bots[k])
             else:
                 self.losscount += 1
         print "kills: {kill}/{tot}, Losses {loss}/{tot}".format(kill=self.killcount, loss=self.losscount,
@@ -314,24 +333,17 @@ class GlueballCommander(Commander):
         enemyFlag = self.game.enemyTeam.flag.position  # NOQA
         myFlag = self.game.team.flag.position  # NOQA
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation  # NOQA
-        availablebots = self.game.bots_available  # NOQA
         alivebots = self.game.bots_alive  # NOQA
 
+        self.needsorders = set()
+
         self.processevents()
+        self.clearthedead()
 
-        # enemyFlagAtHome = True
-        # if enemyFlag.distance(enemyFlagSpawn) > 1.0:
-        #     enemyFlagAtHome = False
-
-        # print self.game.match.timeToNextRespawn, self.timetilnextrespawn
         if self.game.match.timeToNextRespawn > self.timetilnextrespawn:
             self.respawn()
 
         self.timetilnextrespawn = self.game.match.timeToNextRespawn
-
-        self.attackcount = 0
-
-        self.clearthedead()
 
         self.seenenemies = self.getseenlivingenemies()
 
@@ -342,6 +354,7 @@ class GlueballCommander(Commander):
         self.moved_this_turn = []
 
         for bot in self.game.bots_available:
+            self.needsorders.add(bot)
             self.clearfromgroups(bot)
 
         self.try_to_overpower()
@@ -372,8 +385,9 @@ class GlueballCommander(Commander):
         for bot in self.groups["charging"]:
             closest = getclosest(bot.position, prey)
             self.clearfromgroups(bot)
-            self.issuesafe(commands.Attack, bot, closest.position, lookAt=closest.position, description='hunt')
+            self.issuesafe(commands.Attack, bot, closest.position, lookAt=closest.position, description='hunt {}'.format(closest.name))
             self.groups["hunting"].append(bot)
+            self.hunters[bot.name] = closest.name
 
     def try_to_overpower(self):
         if len(self.groups["waiting"]) > len(self.enemydefenders):
@@ -444,22 +458,25 @@ class GlueballCommander(Commander):
 
     def order_remaining(self):
         flagScoreLocation = self.game.team.flagScoreLocation
-        for bot in self.game.bots_available:
-            # print "bots available"
-            if bot.name in self.moved_this_turn:
-                continue
-            if bot.state is bot.STATE_SHOOTING:
-                #self.clearfromgroups(bot)
-                continue
+        for bot in list(self.needsorders):
             if bot.flag:
+                print "{} has flag this turn".format(bot.name)
                 # if a bot has the flag run to the scoring location
                 self.issuesafe(commands.Move, bot, flagScoreLocation, description='Turn in the flag fail')
                 self.clearfromgroups(bot)
                 self.groups["returningflag"].append(bot)
             if bot in self.groups["defenders"]:
+                print "{} is a defender".format(bot.name)
                 continue
             else:
+                # print "{} being issued attack".format(bot.name)
                 self.attack(bot)
+        if len(self.needsorders) > 0:
+            print "failed to give all orders, should not happen!"
+            print self.groups
+            for k, v in self.groups.iteritems():
+                print k, [b.name for b in v]
+            print [bot.name for bot in self.needsorders]
 
     def shutdown(self):
         """Use this function to teardown your bot after the game is over, or perform an
