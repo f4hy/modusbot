@@ -48,7 +48,7 @@ class ModusCommander(Commander):
         self.verbose = True    # display the command descriptions next to the bot labels
 
         filelogLevel = logging.DEBUG
-        STDlogLevel = logging.DEBUG
+        STDlogLevel = logging.WARN
 
         filehander = self.log.handlers[0]
         stdoutloghandler = logging.StreamHandler(sys.stdout)
