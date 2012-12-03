@@ -119,9 +119,9 @@ class ModusCommander(Commander):
             return
         if bot.state is bot.STATE_TAKINGORDERS:
             self.log.warn("WARNING: reissuing order to {}, {}, {}".format(bot.name, command, description))
-            # return
+            return
 
-        self.log.debug("Issuing {} command {}".format(bot.name, description))
+        self.log.info("Issuing {} command {}".format(bot.name, description))
         self.currentcommand[bot] = {"command": command, "target": target, "facingDirection": facingDirection,
                                     "lookAt": lookAt, "description": description}
         if group is not None:
@@ -251,7 +251,11 @@ class ModusCommander(Commander):
             exit(0)
         if self.isinFOV(defender_bot, closestattacker.position) and defender_bot in self.groups["aimatenemy"]:
             return
-        #if defender_bot not in self.groups["aimatenemy"]:
+
+        if defender_bot in self.groups["aimatenemy"]:
+            if defender_bot.facingDirection != self.currentcommand[defender_bot]["facingDirection"]:
+                self.log.warn("has not aimed yet")
+                return
         else:
             direction = closestattacker.position - defender_bot.position
             self.issuesafe(commands.Defend, defender_bot, facingDirection=direction,
@@ -530,11 +534,11 @@ class ModusCommander(Commander):
             if bot.state == bot.STATE_DEFENDING and self.innogroups(bot):
                 self.log.warn("defending bot {} is in no groups!!!".format(bot.name))
                 self.giveneworders(bot)
-                raw_input("Press Enter to continue...")
+                # raw_input("Press Enter to continue...")
 
         self.seenenemies = self.getseenlivingenemies()
 
-        self.enemydefenders = [e for e in self.seenenemies if e.position.distance(enemyFlag) < self.level.firingDistance]
+        self.enemydefenders = [e for e in self.seenenemies if e.position.distance(enemyFlag) < self.level.firingDistance and e.state == e.STATE_DEFENDING]
 
         self.enemyattackers = [e for e in self.seenenemies if e.position.distance(myFlag) < self.level.firingDistance * 3.0]
 
