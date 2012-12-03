@@ -81,6 +81,7 @@ class ModusCommander(Commander):
         self.killcount = 0
         self.losscount = 0
         self.hunters = {}
+        self.needsorders = set()
 
         self.pairs = {}
 
@@ -98,6 +99,7 @@ class ModusCommander(Commander):
     def addtogroup(self, bot, group):
         self.clearfromgroups(bot)
         if group in ["defending", "watching", "aimatenemy"]:
+            self.log.debug("adding {} to defenders because adding to {}".format(bot.name, group))
             self.groups["defenders"].add(bot)
         if group in ["watching", "aimatenemy"]:
             self.groups["defending"].add(bot)
@@ -117,8 +119,9 @@ class ModusCommander(Commander):
             return
         if bot.state is bot.STATE_TAKINGORDERS:
             self.log.warn("WARNING: reissuing order to {}, {}, {}".format(bot.name, command, description))
-            return
+            # return
 
+        self.log.debug("Issuing {} command {}".format(bot.name, description))
         self.currentcommand[bot] = {"command": command, "target": target, "facingDirection": facingDirection,
                                     "lookAt": lookAt, "description": description}
         if group is not None:
@@ -152,6 +155,9 @@ class ModusCommander(Commander):
         self.dead.clear()
         pass
 
+    def innogroups(self, bot):
+        return bot not in set.union(*self.groups.values())
+
     def clearthedead(self):
         """ remove dead from the groups"""
         alivebots = self.game.bots_alive
@@ -165,6 +171,7 @@ class ModusCommander(Commander):
     def clearpairs(self, bot):
         for k, v in self.pairs.items():
             if bot == k or bot == v:
+                self.log.debug("removing {} paired with {}".format(k.name, v.name))
                 self.giveneworders(k)
                 del self.pairs[k]
 
@@ -185,13 +192,17 @@ class ModusCommander(Commander):
 
     def setnumberofdefenders(self):
         self.log.debug("%d , %d-%d", len(self.enemydefenders), self.numberofbots, self.killcount)
-        if len(self.enemydefenders) == self.numberofbots - self.killcount:
+        if self.numberofbots - self.killcount == 0:  # They are all dead
+            return 0
+        if len(self.enemydefenders) > 0 and len(self.enemydefenders) == self.numberofbots - self.killcount:
             self.log.debug("they are full D")
             self.enemyfullD = True
             for d in self.groups["defenders"].copy():
+                self.log.debug("giving {} new orders".format(d.name))
                 self.giveneworders(d)
             return 0
         else:
+            self.enemyfullD = False
             return self.maxnumberofdefenders
 
     def set_defenders(self):
@@ -207,14 +218,12 @@ class ModusCommander(Commander):
                 _, closest_to_my_flag = sorted([(x.position.distance(myFlag), x) for x in potentialdefenders])[0]
 
                 self.defend(closest_to_my_flag)
-                print "groups", self.groups
-                print "defenders", self.groups["defenders"]
                 self.groups["defenders"].add(closest_to_my_flag)
                 self.needsorders.discard(closest_to_my_flag)
                 self.moved_this_turn.add(closest_to_my_flag.name)
 
     def defend(self, defender_bot):
-        self.log.debug("defend()")
+        self.log.debug("defend({})".format(defender_bot.name))
         primelist = [2, 3, 5, 7, 11]
         flag = self.game.team.flag.position
         mypos = defender_bot.position
@@ -235,7 +244,7 @@ class ModusCommander(Commander):
             self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach', group="defenders")
 
     def aimatenemy(self, defender_bot):
-        self.log.debug("aimatenemy()")
+        self.log.debug("aimatenemy({})".format(defender_bot.name))
         closestattacker = getclosest(defender_bot.position, self.enemyattackers)
         if closestattacker is None:
             self.log.error("closest attacker none!")
@@ -257,6 +266,7 @@ class ModusCommander(Commander):
         self.issuesafe(commands.Defend, watch_bot, facingDirection=(flag - mypos), description='watching flag', group="watching")
 
     def attack(self, attack_bot):
+        self.log.debug("attack({})".format(attack_bot.name))
         enemyFlag = self.game.enemyTeam.flag.position
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation
         mypos = attack_bot.position
@@ -308,7 +318,7 @@ class ModusCommander(Commander):
         return self.level.findNearestFreePosition(topos)  # Should never get here
 
     def approachflag(self, attack_bot):
-        self.log.debug("approachflag()")
+        self.log.debug("approachflag({})".format(attack_bot.name))
         enemyFlag = self.game.enemyTeam.flag.position
         mypos = attack_bot.position
         FOV = self.level.FOVangle
@@ -337,7 +347,7 @@ class ModusCommander(Commander):
             self.issuesafe(commands.Attack, attack_bot, enemyFlag, lookAt=enemyFlag, description='Attack enemy flag', group="attackingflag")
             self.log.debug("attacking flag {}".format(attack_bot.name))
             return
-        self.clearfromgroups(attack_bot)
+        # self.clearfromgroups(attack_bot)
 
     def getseenenemies(self):
         alivebots = self.game.bots_alive
@@ -364,6 +374,7 @@ class ModusCommander(Commander):
             self.dead.add(e.subject)
             self.clearpairs(e.subject)
             if e.subject is None or e.instigator is None:
+                self.log.error("Error event actors are none subject:{}, intigator:{}".format(e.subject, e.intigator))
                 continue
             self.log.info("{} was killed by {}!".format(e.subject.name, e.instigator.name))
             if e.instigator.team.name == self.game.team.name:
@@ -379,6 +390,7 @@ class ModusCommander(Commander):
                         self.clearfromgroups(self.game.bots[k])
             else:
                 self.losscount += 1
+                self.log.debug("removing {} because died".format(e.subject.name))
                 self.clearfromgroups(e.subject)
 
         self.log.info("kills: {kill}/{tot}, Losses {loss}/{tot}".format(kill=self.killcount, loss=self.losscount,
@@ -446,12 +458,13 @@ class ModusCommander(Commander):
             #     self.aimatenemy(bot)
         else:
             for bot in list(self.groups["aimatenemy"]):
-                self.clearfromgroups(bot)
                 self.defend(bot)
                 self.moved_this_turn.add(bot.name)
 
     def set_flagwatcher(self):
         if len(self.groups["defending"]) < 1:
+            return
+        if len(self.enemyattackers) > 0:
             return
         if len(self.groups["defending"]) == self.numberofdefenders:
             closesttoflag = getclosest(self.game.team.flag.position, self.groups["defending"])
@@ -471,8 +484,8 @@ class ModusCommander(Commander):
 
     def reassign_when_flag_dropped(self):
         if not self.captured():
-            for bot in self.groups["flagspawn"].copy():
-                self.clearfromgroups(bot)
+            for bot in self.groups["flagspawn"].union(self.groups["chargingflagspawn"]).copy():
+                # self.clearfromgroups(bot)
                 self.attack(bot)
                 self.moved_this_turn.add(bot.name)
 
@@ -502,18 +515,22 @@ class ModusCommander(Commander):
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation  # NOQA
         alivebots = self.game.bots_alive  # NOQA
 
-        print "tic"
-        print [bot.name for bot in self.groups["defenders"]]
+        self.needsorders.clear()
 
-        self.needsorders = set()
+        if self.game.match.timeToNextRespawn > self.timetilnextrespawn:
+            self.respawn()
+        self.timetilnextrespawn = self.game.match.timeToNextRespawn
 
         self.processevents()
         self.clearthedead()
 
-        if self.game.match.timeToNextRespawn > self.timetilnextrespawn:
-            self.respawn()
-
-        self.timetilnextrespawn = self.game.match.timeToNextRespawn
+        # If a bot is defending but new order failed (firing or
+        # something) the bot will be stuck without orders forever
+        for bot in alivebots:
+            if bot.state == bot.STATE_DEFENDING and self.innogroups(bot):
+                self.log.warn("defending bot {} is in no groups!!!".format(bot.name))
+                self.giveneworders(bot)
+                raw_input("Press Enter to continue...")
 
         self.seenenemies = self.getseenlivingenemies()
 
@@ -524,8 +541,9 @@ class ModusCommander(Commander):
         self.moved_this_turn = set()
 
         for bot in self.game.bots_available:
-            self.needsorders.add(bot)
-            self.clearfromgroups(bot)
+            self.giveneworders(bot)
+            # self.needsorders.add(bot)
+            # self.clearfromgroups(bot)
 
         self.order_flag_carrier()
 
@@ -546,15 +564,6 @@ class ModusCommander(Commander):
         self.order_approachers()
         # for all bots which aren't currently doing anything
         self.order_remaining()
-
-        for bot in alivebots:
-            if bot.state == bot.STATE_DEFENDING and bot not in self.groups["defenders"]:
-                print "error"
-                print "defending but not in defenders"
-                print bot.name
-                print "defenders", [b.name for b in self.groups["defenders"]]
-                raw_input("Press Enter to continue...")
-                # exit()
 
     def order_remaining(self):
         flagScoreLocation = self.game.team.flagScoreLocation
