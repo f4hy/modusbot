@@ -319,8 +319,7 @@ class ModusCommander(Commander):
         # else
         if dist > self.level.firingDistance * 2.0:
             if attack_bot not in self.groups["charging"]:
-                loc = enemyFlag + (enemyFlag.midPoint(mypos) - enemyFlag) * 1.2
-                goal = self.level.findNearestFreePosition(loc)
+                goal = enemyFlag + (enemyFlag.midPoint(mypos) - enemyFlag) * 1.2
                 self.issuesafe(commands.Charge, attack_bot, goal, description='Charge enemy flag', group="charging")
         else:
             self.approachflag(attack_bot)
