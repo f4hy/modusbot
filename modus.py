@@ -197,6 +197,10 @@ class ModusCommander(Commander):
         mypos = defender_bot.position
         dist = defender_bot.position.distance(flag)
 
+        if self.theyhaveourflag():
+            self.recoverflag(defender_bot)
+            return
+
         if dist > self.level.firingDistance + 1.0:
             # direction = flag.midPoint(defender_bot.position)-flag
             # goal = flag+flag.midPoint(defender_bot.position).normalized()*(self.level.firingDistance+1.0)
@@ -213,6 +217,15 @@ class ModusCommander(Commander):
             goal = self.level.findNearestFreePosition(flag.midPoint(mypos))
             #self.issuesafe(commands.Attack, defender_bot, goal, lookAt=flag, description='Slow approach')
             self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach')
+
+    def recoverflag(self, defender_bot):
+        pass
+        flag = self.game.team.flag.position
+        mypos = defender_bot.position
+        if mypos.distance(flag) < flag.distance(self.game.enemyTeam.flagScoreLocation):
+            self.issuesafe(commands.Charge, defender_bot, flag, description="Chasing flag!", groups="flagchaser")
+        else:
+            self.issuesafe(commands.Attack, defender_bot, self.game.enemyTeam.flagScoreLocation, lookAt=flag, description="Cut off flag!", groups="flagcutoff")
 
     def aimatenemy(self, defender_bot):
         self.log.debug("aimatenemy()")
