@@ -72,6 +72,8 @@ class ModusCommander(Commander):
 
         self.enemyfullD = False
 
+        self.tickcount = 0
+
         self.maxnumberofdefenders = 2
         if self.game.bots_alive < 3:
             self.maxnumberofdefenders = 1
@@ -477,6 +479,9 @@ class ModusCommander(Commander):
         myFlag = self.game.team.flag.position  # NOQA
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation  # NOQA
         alivebots = self.game.bots_alive  # NOQA
+
+        self.log.info("tick: %s", self.tickcount)
+        self.tickcount += 1
 
         self.needsorders = set()
 
