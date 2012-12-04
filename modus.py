@@ -90,7 +90,6 @@ class ModusCommander(Commander):
         self.currentcommand = {b: None for b in self.game.bots_alive}
         self.killcount = 0
         self.losscount = 0
-        self.hunters = {}
         self.needsorders = set()
 
         self.pairs = {}
@@ -183,9 +182,9 @@ class ModusCommander(Commander):
     def clearpairs(self, bot):
         for k, v in self.pairs.items():
             if bot == k or bot == v:
-                self.log.debug("removing {} paired with {}".format(k.name, v.name))
-                self.giveneworders(k)
+                self.log.warn("removing {} paired with {}".format(k.name, v.name))
                 del self.pairs[k]
+                self.giveneworders(k)
 
     def giveneworders(self, bot):
         self.log.debug("give new orders %s", bot.name)
@@ -195,12 +194,9 @@ class ModusCommander(Commander):
     def clearfromgroups(self, bot_to_remove):
         """ remove bot from all groups"""
         self.log.debug("removing %s from groups", bot_to_remove.name)
+        self.clearpairs(bot_to_remove)
         for group in self.groups.keys():
             self.groups[group].discard(bot_to_remove)
-        if bot_to_remove.name in self.hunters:
-            self.log.debug("removing {}".format(bot_to_remove.name))
-            del self.hunters[bot_to_remove.name]
-            self.needsorders.add(bot_to_remove)
 
     def setnumberofdefenders(self):
         self.log.debug("%d , %d-%d", len(self.enemydefenders), self.numberofbots, self.killcount)
@@ -219,8 +215,6 @@ class ModusCommander(Commander):
 
     def set_defenders(self):
         self.numberofdefenders = self.setnumberofdefenders()
-        self.log.debug("numdefenders %d", self.numberofdefenders)
-        self.log.debug("defenders?? %s", repr(self.groups["defenders"]))
         myFlag = self.game.team.flag.position
         if self.needsorders and len(self.groups["defenders"]) < self.numberofdefenders:
             while len(self.groups["defenders"]) < self.numberofdefenders:
@@ -287,6 +281,7 @@ class ModusCommander(Commander):
             direction = closestattacker.position - defender_bot.position
             self.issuesafe(commands.Defend, defender_bot, facingDirection=direction,
                            description='defending against attacker {}!'.format(closestattacker.name), group="aimatenemy")
+            self.log.warn("pairing {} with {}".format(defender_bot.name, closestattacker.name))
             self.pairs[defender_bot] = closestattacker
 
     def eyeonflag(self, watch_bot):
@@ -370,10 +365,11 @@ class ModusCommander(Commander):
                 self.issuesafe(commands.Attack, attack_bot, goal, lookAt=enemyFlag, description='Inch closer', group="attacking")
             return
         for enemy in self.enemydefenders:
-            if anglebetween(enemy.facingDirection, mypos - enemy.position) <= FOV:
+            if anglebetween(enemy.facingDirection, mypos - enemy.position) <= FOV and mypos.distance(enemy.position) > self.level.firingDistance:
                 self.log.debug("not attacking because of {}".format(enemy.name))
                 if attack_bot not in self.groups["waiting"]:
                     self.issuesafe(commands.Defend, attack_bot, facingDirection=(enemy.position - mypos), description='Cant attack {}'.format(enemy.name), group="waiting")
+                    self.log.warn("pairing {} with {}".format(attack_bot.name, enemy.name))
                     self.pairs[attack_bot] = enemy
                     self.log.debug("waiting {}".format(attack_bot.name))
 
@@ -407,22 +403,13 @@ class ModusCommander(Commander):
 
         for e in [ev for ev in newevents if e.type == e.TYPE_KILLED]:
             self.dead.add(e.subject)
-            self.clearpairs(e.subject)
             if e.subject is None or e.instigator is None:
                 self.log.error("Error event actors are none subject:{}, instigator:{}".format(e.subject, e.instigator))
                 continue
+            self.clearpairs(e.subject)
             self.log.info("{} was killed by {}!".format(e.subject.name, e.instigator.name))
             if e.instigator.team.name == self.game.team.name:
-
                 self.killcount += 1
-
-                for k, v in list(self.hunters.items()):
-                    if e.subject.name == v:
-                        self.log.debug("removing {} from hunters".format(k))
-                        del self.hunters[k]
-                        self.giveneworders(self.game.bots[k])
-                        self.needsorders.add(self.game.bots[k])
-                        self.clearfromgroups(self.game.bots[k])
             else:
                 self.losscount += 1
                 self.log.debug("removing {} because died".format(e.subject.name))
@@ -448,18 +435,16 @@ class ModusCommander(Commander):
                 self.giveneworders(bot)
 
     def checkformovedprey(self):
-        for huntername, preyname in self.hunters.items():
-            hunter = self.game.bots[huntername]
-            prey = self.game.bots[preyname]
+        for hunter in self.groups["hunting"].copy():
+            prey = self.pairs[hunter]
             huntersgoal = self.currentcommand[hunter]["target"]
             if huntersgoal.distance(prey.position) > self.level.firingDistance * 2:
-                self.log.warning("prey {} has moved too far from original chase point of {}".format(preyname, huntername))
+                self.log.warning("prey {} has moved too far from original chase point of {}".format(prey.name, hunter.name))
                 self.giveneworders(hunter)
 
     def checkfordefendingprey(self):
-        for huntername, preyname in self.hunters.items():
-            hunter = self.game.bots[huntername]
-            prey = self.game.bots[preyname]
+        for hunter in self.groups["hunting"].copy():
+            prey = self.pairs[hunter]
             if prey.state == prey.STATE_DEFENDING and self.isinFOV(prey, hunter.position):
                 self.giveneworders(hunter)
 
@@ -475,7 +460,9 @@ class ModusCommander(Commander):
         for bot in self.groups["charging"].copy():
             closest = getclosest(bot.position, prey)
             self.issuesafe(commands.Attack, bot, closest.position, lookAt=closest.position, description='hunt {}'.format(closest.name), group="hunting")
-            self.hunters[bot.name] = closest.name
+            self.pairs[bot] = closest
+            self.log.warn("pairing {} with {}".format(bot.name, closest.name))
+            # self.hunters[bot.name] = closest.name
 
     def try_to_overpower(self):
         alivebots = self.game.bots_alive
@@ -579,7 +566,6 @@ class ModusCommander(Commander):
             if bot.state == bot.STATE_DEFENDING and self.innogroups(bot):
                 self.log.warn("defending bot {} is in no groups!!!".format(bot.name))
                 self.giveneworders(bot)
-                # raw_input("Press Enter to continue...")
 
         self.seenenemies = self.getseenlivingenemies()
 
@@ -633,6 +619,8 @@ class ModusCommander(Commander):
             for k, v in self.groups.iteritems():
                 self.log.critical("group key %s, value %s", k, repr([b.name for b in v]))
             self.log.critical("needs orders list remaining %s", repr([bot.name for bot in self.needsorders]))
+            for bot in self.needsorders:
+                self.clearfromgroups(bot)
 
     def shutdown(self):
         """Use this function to teardown your bot after the game is over, or perform an
