@@ -163,6 +163,8 @@ class ModusCommander(Commander):
         self.killcount = 0
         self.losscount = 0
         self.dead.clear()
+        for bot in self.groups["charging"].copy():
+            self.giveneworders(bot)
         pass
 
     def innogroups(self, bot):
@@ -301,6 +303,10 @@ class ModusCommander(Commander):
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation
         mypos = attack_bot.position
         dist = attack_bot.position.distance(enemyFlag)
+        if self.numberofbots - self.killcount == 0 and not self.captured():  # They are all dead
+            if attack_bot not in self.groups["charging"]:
+                self.issuesafe(commands.Charge, attack_bot, enemyFlag, description='Charge enemy flag', group="charging")
+                return
         if self.captured():
             if attack_bot.position.distance(enemyFlagSpawn) < self.level.firingDistance / 3.0:
                 if attack_bot not in self.groups["flagspawn"]:
