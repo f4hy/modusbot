@@ -191,7 +191,7 @@ class ModusCommander(Commander):
             # direction = flag.midPoint(defender_bot.position)-flag
             # goal = flag+flag.midPoint(defender_bot.position).normalized()*(self.level.firingDistance+1.0)
             goal = self.level.findNearestFreePosition(flag.midPoint(defender_bot.position))
-            self.issuesafe(commands.Move, defender_bot, goal, description='Get into position to defend')
+            self.issuesafe(commands.Charge, defender_bot, goal, description='Get into position to defend')
         elif dist < self.level.firingDistance / 2.0:
             enemySpawn = self.enemySpawn
             directionstolook = [(enemySpawn - mypos, random.choice(primelist)), (mypos - enemySpawn, 0.1)]
@@ -461,7 +461,7 @@ class ModusCommander(Commander):
         flagScoreLocation = self.game.team.flagScoreLocation
         for bot in alivebots:
             if bot.flag and bot not in self.groups["returningflag"]:
-                self.issuesafe(commands.Move, bot, flagScoreLocation, description='Turn in the flag')
+                self.issuesafe(commands.Charge, bot, flagScoreLocation, description='Turn in the flag')
                 self.moved_this_turn.append(bot.name)
                 self.clearfromgroups(bot)
                 self.groups["returningflag"].append(bot)
@@ -525,7 +525,7 @@ class ModusCommander(Commander):
             if bot.flag:
                 self.log.info("{} has flag this turn".format(bot.name))
                 # if a bot has the flag run to the scoring location
-                self.issuesafe(commands.Move, bot, flagScoreLocation, description='Turn in the flag fail')
+                self.issuesafe(commands.Charge, bot, flagScoreLocation, description='Turn in the flag fail')
                 self.clearfromgroups(bot)
                 self.groups["returningflag"].append(bot)
             if bot in self.groups["defenders"]:
