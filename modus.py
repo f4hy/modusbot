@@ -404,7 +404,7 @@ class ModusCommander(Commander):
             self.dead.add(e.subject)
             self.clearpairs(e.subject)
             if e.subject is None or e.instigator is None:
-                self.log.error("Error event actors are none subject:{}, intigator:{}".format(e.subject, e.intigator))
+                self.log.error("Error event actors are none subject:{}, instigator:{}".format(e.subject, e.instigator))
                 continue
             self.log.info("{} was killed by {}!".format(e.subject.name, e.instigator.name))
             if e.instigator.team.name == self.game.team.name:
@@ -428,6 +428,19 @@ class ModusCommander(Commander):
 
         for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_PICKEDUP]:
             self.log.info("{} pickedup the flag!".format(e.instigator.name))
+
+        for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_RESTORED]:
+            self.log.info("flag restored!")
+            for bot in self.groups["defenders"].copy():
+                self.giveneworders(bot)
+        for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_CAPTURED]:
+            self.log.info("flag CAPTURED!")
+            for bot in self.groups["flagcutoff"].union(self.groups["flagchaser"]).copy():
+                self.giveneworders(bot)
+        for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_DROPPED]:
+            self.log.info("flag dropped!")
+            for bot in self.groups["flagcutoff"].union(self.groups["flagchaser"]).copy():
+                self.giveneworders(bot)
 
     def checkformovedprey(self):
         for huntername, preyname in self.hunters.items():
