@@ -29,18 +29,28 @@ class ModusCommander(Commander):
     to the execution command you use to run the competition.
     """
 
+    tickcount = 0
+
     def initialize(self):
         """Use this function to setup your bot before the game starts."""
         self.verbose = True    # display the command descriptions next to the bot labels
 
         filelogLevel = logging.DEBUG
-        STDlogLevel = logging.WARNING
+        STDlogLevel = logging.WARN
 
-        filehander = self.log.handlers[0]
+        class ContextFilter(logging.Filter):
+            def filter(self, record):
+                record.tick = ModusCommander.tickcount
+                return True
+
+        filehandler = self.log.handlers[0]
         stdoutloghandler = logging.StreamHandler(sys.stdout)
-        filehander.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-        filehander.setLevel(filelogLevel)
-        stdoutloghandler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        c = ContextFilter()
+        filehandler.addFilter(c)
+        filehandler.setFormatter(logging.Formatter('$(tick)d: %(levelname)s: %(message)s'))
+        filehandler.setLevel(filelogLevel)
+        stdoutloghandler.addFilter(c)
+        stdoutloghandler.setFormatter(logging.Formatter('%(tick)d: %(levelname)s: %(message)s'))
         stdoutloghandler.setLevel(STDlogLevel)
         self.log.addHandler(stdoutloghandler)
 
@@ -71,8 +81,6 @@ class ModusCommander(Commander):
         self.allbots = self.game.bots.values()
 
         self.enemyfullD = False
-
-        self.tickcount = 0
 
         self.maxnumberofdefenders = 2
         if self.game.bots_alive < 3:
@@ -196,6 +204,8 @@ class ModusCommander(Commander):
             self.issuesafe(commands.Charge, defender_bot, goal, description='Get into position to defend')
         elif dist < self.level.firingDistance / 2.0:
             enemySpawn = self.enemySpawn
+            primetime = random.choice(primelist)
+            self.log.info("watching for primetime {}".format(primetime))
             directionstolook = [(enemySpawn - mypos, random.choice(primelist)), (mypos - enemySpawn, 0.1)]
             self.issuesafe(commands.Defend, defender_bot, facingDirection=directionstolook, description='defending')
             self.groups["defending"].append(defender_bot)
@@ -480,8 +490,8 @@ class ModusCommander(Commander):
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation  # NOQA
         alivebots = self.game.bots_alive  # NOQA
 
-        self.log.info("tick: %s", self.tickcount)
         self.tickcount += 1
+        ModusCommander.tickcount += 1
 
         self.needsorders = set()
 
