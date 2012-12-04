@@ -292,7 +292,8 @@ class ModusCommander(Commander):
             return
         flag = self.game.team.flag.position
         mypos = watch_bot.position
-        self.issuesafe(commands.Defend, watch_bot, facingDirection=(flag - mypos), description='watching flag', group="watching")
+        if watch_bot not in self.groups["watching"]:
+            self.issuesafe(commands.Defend, watch_bot, facingDirection=(flag - mypos), description='watching flag', group="watching")
 
     def attack(self, attack_bot):
         self.log.debug("attack({})".format(attack_bot.name))
