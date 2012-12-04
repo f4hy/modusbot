@@ -6,6 +6,20 @@ import logging
 import sys
 import random
 import math
+import traceback
+
+
+def exit_except(fn):
+    def wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception, e:
+            print "Exception!!", e
+            print traceback.format_exc()
+            print sys.exc_info()[0]
+            raw_input("Press Enter to continue...")
+            exit(0)
+    return wrapped
 
 
 def anglebetween(v1, v2):
@@ -29,14 +43,14 @@ class ModusCommander(Commander):
     to the execution command you use to run the competition.
     """
 
-    tickcount = 0
+    tickcount = 1
 
     def initialize(self):
         """Use this function to setup your bot before the game starts."""
         self.verbose = True    # display the command descriptions next to the bot labels
 
         filelogLevel = logging.DEBUG
-        STDlogLevel = logging.WARN
+        STDlogLevel = logging.WARNING
 
         class ContextFilter(logging.Filter):
             def filter(self, record):
@@ -55,9 +69,9 @@ class ModusCommander(Commander):
         self.log.addHandler(stdoutloghandler)
 
         self.seenodefenders = True
-        self.groups = {"defenders": [], "returningflag": [], "defending": [], "watching": [], "overpower": [],
-                       "waiting": [], "charging": [], "attackingflag": [], "aimatenemy": [],
-                       "flagspawn": [], "chargingflagspawn": [], "hunting": []}
+        self.groups = {"defenders": set(), "returningflag": set(), "defending": set(), "watching": set(), "overpower": set(),
+                       "waiting": set(), "charging": set(), "attackingflag": set(), "aimatenemy": set(), "attacking": set(),
+                       "flagspawn": set(), "chargingflagspawn": set(), "hunting": set(), "flagchaser": set(), "flagcutoff": set()}
 
         first, second = self.game.enemyTeam.botSpawnArea
         self.enemySpawn = first.midPoint(second)  # NOQA
@@ -77,7 +91,11 @@ class ModusCommander(Commander):
         self.killcount = 0
         self.losscount = 0
         self.hunters = {}
-        self.dead = []
+        self.needsorders = set()
+
+        self.pairs = {}
+
+        self.dead = set()
         self.allbots = self.game.bots.values()
 
         self.enemyfullD = False
@@ -88,19 +106,24 @@ class ModusCommander(Commander):
         if self.game.bots_alive < 2:
             self.maxnumberofdefenders = 0
 
+    def addtogroup(self, bot, group):
+        self.clearfromgroups(bot)
+        if group in ["defending", "watching", "aimatenemy"]:
+            self.log.debug("adding {} to defenders because adding to {}".format(bot.name, group))
+            self.groups["defenders"].add(bot)
+        if group in ["watching", "aimatenemy"]:
+            self.groups["defending"].add(bot)
+        self.groups[group].add(bot)
+
     def issuesafe(self, command, bot, target=None, facingDirection=None, lookAt=None, description=None, group=None):
         if target:
             safetarget = self.level.findNearestFreePosition(target)
 
-        if group is not None:
-            if bot not in self.groups[group]:
-                self.groups[group].append(bot)
-
         self.needsorders.discard(bot)
-        if bot in self.moved_this_turn:
+        if bot.name in self.moved_this_turn:
             self.log.warn("do not issue order to {}, already issued this turn, passing".format(bot.name))
             return
-        self.moved_this_turn.append(bot.name)
+        self.moved_this_turn.add(bot.name)
         if bot.state is bot.STATE_SHOOTING:
             self.log.warn("do not issue order to firing bot {}, passing".format(bot.name))
             return
@@ -108,8 +131,11 @@ class ModusCommander(Commander):
             self.log.warn("WARNING: reissuing order to {}, {}, {}".format(bot.name, command, description))
             return
 
+        self.log.info("Issuing {} command {}".format(bot.name, description))
         self.currentcommand[bot] = {"command": command, "target": target, "facingDirection": facingDirection,
                                     "lookAt": lookAt, "description": description}
+        if group is not None:
+            self.addtogroup(bot, group)
 
         if command == commands.Move:
             self.issue(commands.Move, bot, safetarget, description)
@@ -136,16 +162,28 @@ class ModusCommander(Commander):
         self.log.info("respawned!")
         self.killcount = 0
         self.losscount = 0
-        self.dead = []
+        self.dead.clear()
         pass
+
+    def innogroups(self, bot):
+        return bot not in set.union(*self.groups.values())
 
     def clearthedead(self):
         """ remove dead from the groups"""
         alivebots = self.game.bots_alive
         for g in self.groups.keys():
-            self.groups[g] = [bot for bot in self.groups[g] if bot in alivebots]
-        for deadbot in [bot for bot in self.allbots if bot.health < 1 and bot.seenlast > 0]:
+            self.groups[g] = set(bot for bot in self.groups[g] if bot in alivebots)
+        for deadbot in [bot for bot in self.allbots if bot not in self.dead and bot.health < 1 and bot.seenlast > 0]:
+            self.log.debug("clearing {} because of no health".format(deadbot.name))
+            self.dead.add(deadbot)
             self.clearfromgroups(deadbot)
+
+    def clearpairs(self, bot):
+        for k, v in self.pairs.items():
+            if bot == k or bot == v:
+                self.log.debug("removing {} paired with {}".format(k.name, v.name))
+                self.giveneworders(k)
+                del self.pairs[k]
 
     def giveneworders(self, bot):
         self.log.debug("give new orders %s", bot.name)
@@ -154,8 +192,9 @@ class ModusCommander(Commander):
 
     def clearfromgroups(self, bot_to_remove):
         """ remove bot from all groups"""
+        self.log.debug("removing %s from groups", bot_to_remove.name)
         for group in self.groups.keys():
-            self.groups[group] = [bot for bot in self.groups[group] if bot is not bot_to_remove]
+            self.groups[group].discard(bot_to_remove)
         if bot_to_remove.name in self.hunters:
             self.log.debug("removing {}".format(bot_to_remove.name))
             del self.hunters[bot_to_remove.name]
@@ -163,20 +202,23 @@ class ModusCommander(Commander):
 
     def setnumberofdefenders(self):
         self.log.debug("%d , %d-%d", len(self.enemydefenders), self.numberofbots, self.killcount)
-        if len(self.enemydefenders) == self.numberofbots - self.killcount:
+        if self.numberofbots - self.killcount == 0:  # They are all dead
+            return 0
+        if len(self.enemydefenders) > 0 and len(self.enemydefenders) == self.numberofbots - self.killcount:
             self.log.debug("they are full D")
             self.enemyfullD = True
-            for d in self.groups["defenders"]:
+            for d in self.groups["defenders"].copy():
+                self.log.debug("giving {} new orders".format(d.name))
                 self.giveneworders(d)
             return 0
         else:
+            self.enemyfullD = False
             return self.maxnumberofdefenders
 
     def set_defenders(self):
         self.numberofdefenders = self.setnumberofdefenders()
         self.log.debug("numdefenders %d", self.numberofdefenders)
-        if self.numberofdefenders == 0:
-            self.log.debug("defenders?? %s", repr(self.groups["defenders"]))
+        self.log.debug("defenders?? %s", repr(self.groups["defenders"]))
         myFlag = self.game.team.flag.position
         if self.needsorders and len(self.groups["defenders"]) < self.numberofdefenders:
             while len(self.groups["defenders"]) < self.numberofdefenders:
@@ -186,12 +228,12 @@ class ModusCommander(Commander):
                 _, closest_to_my_flag = sorted([(x.position.distance(myFlag), x) for x in potentialdefenders])[0]
 
                 self.defend(closest_to_my_flag)
-                self.groups["defenders"].append(closest_to_my_flag)
+                self.groups["defenders"].add(closest_to_my_flag)
                 self.needsorders.discard(closest_to_my_flag)
-                self.moved_this_turn.append(closest_to_my_flag.name)
+                self.moved_this_turn.add(closest_to_my_flag.name)
 
     def defend(self, defender_bot):
-        self.log.debug("defend()")
+        self.log.debug("defend({})".format(defender_bot.name))
         primelist = [2, 3, 5, 7, 11]
         flag = self.game.team.flag.position
         mypos = defender_bot.position
@@ -205,52 +247,55 @@ class ModusCommander(Commander):
             # direction = flag.midPoint(defender_bot.position)-flag
             # goal = flag+flag.midPoint(defender_bot.position).normalized()*(self.level.firingDistance+1.0)
             goal = self.level.findNearestFreePosition(flag.midPoint(defender_bot.position))
-            self.issuesafe(commands.Charge, defender_bot, goal, description='Get into position to defend')
+            self.issuesafe(commands.Charge, defender_bot, goal, description='Get into position to defend', group="defenders")
         elif dist < self.level.firingDistance / 2.0:
             enemySpawn = self.enemySpawn
             primetime = random.choice(primelist)
             self.log.info("watching for primetime {}".format(primetime))
             directionstolook = [(enemySpawn - mypos, random.choice(primelist)), (mypos - enemySpawn, 0.1)]
-            self.issuesafe(commands.Defend, defender_bot, facingDirection=directionstolook, description='defending')
-            self.groups["defending"].append(defender_bot)
+            self.issuesafe(commands.Defend, defender_bot, facingDirection=directionstolook, description='defending', group="defending")
         else:
             goal = self.level.findNearestFreePosition(flag.midPoint(mypos))
             #self.issuesafe(commands.Attack, defender_bot, goal, lookAt=flag, description='Slow approach')
-            self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach')
+            self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach', group="defenders")
 
     def recoverflag(self, defender_bot):
         pass
         flag = self.game.team.flag.position
         mypos = defender_bot.position
         if mypos.distance(flag) < flag.distance(self.game.enemyTeam.flagScoreLocation):
-            self.issuesafe(commands.Charge, defender_bot, flag, description="Chasing flag!", groups="flagchaser")
+            self.issuesafe(commands.Charge, defender_bot, flag, description="Chasing flag!", group="flagchaser")
         else:
-            self.issuesafe(commands.Attack, defender_bot, self.game.enemyTeam.flagScoreLocation, lookAt=flag, description="Cut off flag!", groups="flagcutoff")
+            self.issuesafe(commands.Attack, defender_bot, self.game.enemyTeam.flagScoreLocation, lookAt=flag, description="Cut off flag!", group="flagcutoff")
 
     def aimatenemy(self, defender_bot):
-        self.log.debug("aimatenemy()")
-        closestattacker = getclosest(defender_bot.position, self.enemyattackers)  # NOQA
+        self.log.debug("aimatenemy({})".format(defender_bot.name))
+        closestattacker = getclosest(defender_bot.position, self.enemyattackers)
         if closestattacker is None:
             self.log.error("closest attacker none!")
             exit(0)
         if self.isinFOV(defender_bot, closestattacker.position) and defender_bot in self.groups["aimatenemy"]:
             return
-        #if defender_bot not in self.groups["aimatenemy"]:
+
+        if defender_bot in self.groups["aimatenemy"]:
+            if defender_bot.facingDirection != self.currentcommand[defender_bot]["facingDirection"]:
+                self.log.warn("has not aimed yet")
+                return
         else:
             direction = closestattacker.position - defender_bot.position
             self.issuesafe(commands.Defend, defender_bot, facingDirection=direction,
-                           description='defending against attacker {}!'.format(closestattacker.name))
-            self.groups["aimatenemy"].append(defender_bot)
+                           description='defending against attacker {}!'.format(closestattacker.name), group="aimatenemy")
+            self.pairs[defender_bot] = closestattacker
 
     def eyeonflag(self, watch_bot):
         if self.groups["watching"]:
             return
         flag = self.game.team.flag.position
         mypos = watch_bot.position
-        self.issuesafe(commands.Defend, watch_bot, facingDirection=(flag - mypos), description='watching flag')
-        self.groups["watching"].append(watch_bot)
+        self.issuesafe(commands.Defend, watch_bot, facingDirection=(flag - mypos), description='watching flag', group="watching")
 
     def attack(self, attack_bot):
+        self.log.debug("attack({})".format(attack_bot.name))
         enemyFlag = self.game.enemyTeam.flag.position
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation
         mypos = attack_bot.position
@@ -258,36 +303,31 @@ class ModusCommander(Commander):
         if self.captured():
             if attack_bot.position.distance(enemyFlagSpawn) < self.level.firingDistance / 3.0:
                 if attack_bot not in self.groups["flagspawn"]:
-                    self.groups["flagspawn"].append(attack_bot)
                     self.issuesafe(commands.Defend, attack_bot, facingDirection=self.enemySpawn - mypos,
-                                   description='defending their flagspawn')
+                                   description='defending their flagspawn', group="flagspawn")
             else:
                 if attack_bot not in self.groups["chargingflagspawn"]:
-                    self.issuesafe(commands.Attack, attack_bot, enemyFlagSpawn, lookAt=enemyFlagSpawn, description='Attack enemy flagspawn')
-                    self.groups["chargingflagspawn"].append(attack_bot)
+                    self.issuesafe(commands.Attack, attack_bot, enemyFlagSpawn, lookAt=enemyFlagSpawn, description='Attack enemy flagspawn', group="chargingflagspawn")
             return
         # else
         if dist > self.level.firingDistance * 2.0:
             if attack_bot not in self.groups["charging"]:
-                self.clearfromgroups(attack_bot)
                 loc = enemyFlag + (enemyFlag.midPoint(mypos) - enemyFlag) * 1.2
                 goal = self.level.findNearestFreePosition(loc)
-                self.issuesafe(commands.Charge, attack_bot, goal, description='Charge enemy flag')
-                self.groups["charging"].append(attack_bot)
+                self.issuesafe(commands.Charge, attack_bot, goal, description='Charge enemy flag', group="charging")
         else:
             self.approachflag(attack_bot)
 
     def overpowerall(self):
         self.log.debug("Overpower go!")
-        for bot in self.groups["waiting"]:
+        for bot in self.groups["waiting"].copy():
             self.overpower(bot)
 
     def overpower(self, attack_bot):
         enemyFlag = self.game.enemyTeam.flag.position
 
         if attack_bot not in self.groups["overpower"]:
-            self.issuesafe(commands.Attack, attack_bot, enemyFlag, lookAt=enemyFlag, description='Overpower defenders')
-            self.groups["overpower"].append(attack_bot)
+            self.issuesafe(commands.Attack, attack_bot, enemyFlag, lookAt=enemyFlag, description='Overpower defenders', group="overpower")
 
     def towards(self, frompos, topos, distance=1.0):
         goal = frompos + ((topos - frompos).normalized()) * distance
@@ -307,40 +347,36 @@ class ModusCommander(Commander):
         return self.level.findNearestFreePosition(topos)  # Should never get here
 
     def approachflag(self, attack_bot):
-        self.log.debug("approachflag()")
+        self.log.debug("approachflag({})".format(attack_bot.name))
         enemyFlag = self.game.enemyTeam.flag.position
         mypos = attack_bot.position
         FOV = self.level.FOVangle
         out_of_range = [e.position.distance(mypos) > self.level.firingDistance + 2 for e in self.enemydefenders]
         if all(out_of_range) and len(self.enemydefenders) > 0:
-            self.clearfromgroups(attack_bot)
             self.log.debug("inch closer {}".format(attack_bot.name))
             if self.groups["waiting"]:
                 goal = getclosest(mypos, self.groups["waiting"]).position
-                self.issuesafe(commands.Charge, attack_bot, goal, lookAt=enemyFlag, description='Join fellow attacker')
+                self.issuesafe(commands.Charge, attack_bot, goal, lookAt=enemyFlag, description='Join fellow attacker', group="attacking")
             else:
                 safedistance = mypos.distance(getclosest(mypos, self.enemydefenders).position) - self.level.firingDistance
                 distancetogo = safedistance / 2.0 if safedistance / 2.0 > 1.0 else 1.0
                 goal = self.towards_require_progress(mypos, enemyFlag, distance=distancetogo)
-                self.issuesafe(commands.Attack, attack_bot, goal, lookAt=enemyFlag, description='Inch closer')
+                self.issuesafe(commands.Attack, attack_bot, goal, lookAt=enemyFlag, description='Inch closer', group="attacking")
             return
         for enemy in self.enemydefenders:
             if anglebetween(enemy.facingDirection, mypos - enemy.position) <= FOV:
                 self.log.debug("not attacking because of {}".format(enemy.name))
                 if attack_bot not in self.groups["waiting"]:
-                    self.issuesafe(commands.Defend, attack_bot, facingDirection=(enemy.position - mypos), description='Cant attack {}'.format(enemy.name))
-                    self.clearfromgroups(attack_bot)
+                    self.issuesafe(commands.Defend, attack_bot, facingDirection=(enemy.position - mypos), description='Cant attack {}'.format(enemy.name), group="waiting")
+                    self.pairs[attack_bot] = enemy
                     self.log.debug("waiting {}".format(attack_bot.name))
-                    self.groups["waiting"].append(attack_bot)
 
                 return
         if attack_bot not in self.groups["attackingflag"]:
-            self.issuesafe(commands.Attack, attack_bot, enemyFlag, lookAt=enemyFlag, description='Attack enemy flag')
-            self.clearfromgroups(attack_bot)
+            self.issuesafe(commands.Attack, attack_bot, enemyFlag, lookAt=enemyFlag, description='Attack enemy flag', group="attackingflag")
             self.log.debug("attacking flag {}".format(attack_bot.name))
-            self.groups["attackingflag"].append(attack_bot)
             return
-        self.clearfromgroups(attack_bot)
+        # self.clearfromgroups(attack_bot)
 
     def getseenenemies(self):
         alivebots = self.game.bots_alive
@@ -364,21 +400,28 @@ class ModusCommander(Commander):
         self.timesincelastevent = max([x.time for x in self.game.match.combatEvents])
 
         for e in [ev for ev in newevents if e.type == e.TYPE_KILLED]:
-            self.dead.append(e.subject)
+            self.dead.add(e.subject)
+            self.clearpairs(e.subject)
             if e.subject is None or e.instigator is None:
+                self.log.error("Error event actors are none subject:{}, intigator:{}".format(e.subject, e.intigator))
                 continue
             self.log.info("{} was killed by {}!".format(e.subject.name, e.instigator.name))
             if e.instigator.team.name == self.game.team.name:
+
                 self.killcount += 1
 
                 for k, v in list(self.hunters.items()):
                     if e.subject.name == v:
                         self.log.debug("removing {} from hunters".format(k))
                         del self.hunters[k]
+                        self.giveneworders(self.game.bots[k])
                         self.needsorders.add(self.game.bots[k])
                         self.clearfromgroups(self.game.bots[k])
             else:
                 self.losscount += 1
+                self.log.debug("removing {} because died".format(e.subject.name))
+                self.clearfromgroups(e.subject)
+
         self.log.info("kills: {kill}/{tot}, Losses {loss}/{tot}".format(kill=self.killcount, loss=self.losscount,
                                                                         tot=self.numberofbots))
 
@@ -410,11 +453,9 @@ class ModusCommander(Commander):
         self.checkformovedprey()
         self.checkfordefendingprey()
 
-        for bot in self.groups["charging"]:
+        for bot in self.groups["charging"].copy():
             closest = getclosest(bot.position, prey)
-            self.clearfromgroups(bot)
-            self.issuesafe(commands.Attack, bot, closest.position, lookAt=closest.position, description='hunt {}'.format(closest.name))
-            self.groups["hunting"].append(bot)
+            self.issuesafe(commands.Attack, bot, closest.position, lookAt=closest.position, description='hunt {}'.format(closest.name), group="hunting")
             self.hunters[bot.name] = closest.name
 
     def try_to_overpower(self):
@@ -440,58 +481,58 @@ class ModusCommander(Commander):
 
     def react_to_attackers(self):
         if len(self.enemyattackers) > 0:
-            for bot in self.groups["defending"][len(self.enemyattackers):]:
+            for bot in list(self.groups["defending"]):
                 self.aimatenemy(bot)
+            # for bot in list(self.groups["defending"])[len(self.enemyattackers):]:
+            #     self.aimatenemy(bot)
         else:
-            for bot in self.groups["aimatenemy"]:
-                self.clearfromgroups(bot)
+            for bot in list(self.groups["aimatenemy"]):
                 self.defend(bot)
-                self.groups["defenders"].append(bot)
-                self.moved_this_turn.append(bot.name)
+                self.moved_this_turn.add(bot.name)
 
     def set_flagwatcher(self):
         if len(self.groups["defending"]) < 1:
             return
+        if len(self.enemyattackers) > 0:
+            return
         if len(self.groups["defending"]) == self.numberofdefenders:
-            superdefender = self.groups["defending"][0]
-            self.eyeonflag(superdefender)
-            self.moved_this_turn.append(superdefender.name)
+            closesttoflag = getclosest(self.game.team.flag.position, self.groups["defending"])
+            self.eyeonflag(closesttoflag)
 
     def react_to_defenders(self):
         numenemydefenders = len(self.enemydefenders)
         if numenemydefenders > 0:
-            for bot in self.groups["charging"]:
+            for bot in self.groups["charging"].copy():
                 self.giveneworders(bot)
                 self.approachflag(bot)
 
         if numenemydefenders > 0:
-            for bot in self.groups["attackingflag"]:
+            for bot in self.groups["attackingflag"].copy():
                 self.giveneworders(bot)
                 self.approachflag(bot)
 
     def reassign_when_flag_dropped(self):
         if not self.captured():
-            for bot in self.groups["flagspawn"]:
-                self.clearfromgroups(bot)
+            for bot in self.groups["flagspawn"].union(self.groups["chargingflagspawn"]).copy():
+                # self.clearfromgroups(bot)
                 self.attack(bot)
-                self.moved_this_turn.append(bot.name)
+                self.moved_this_turn.add(bot.name)
 
     def order_approachers(self):
         for bot in set(self.groups["waiting"]).union(set(self.groups["attackingflag"])):
             self.approachflag(bot)
-            self.moved_this_turn.append(bot.name)
+            self.moved_this_turn.add(bot.name)
 
     def order_flag_carrier(self):
         alivebots = self.game.bots_alive
         flagScoreLocation = self.game.team.flagScoreLocation
         for bot in alivebots:
             if bot.flag and bot not in self.groups["returningflag"]:
-                self.issuesafe(commands.Charge, bot, flagScoreLocation, description='Turn in the flag')
-                self.moved_this_turn.append(bot.name)
-                self.clearfromgroups(bot)
-                self.groups["returningflag"].append(bot)
+                self.issuesafe(commands.Charge, bot, flagScoreLocation, description='Turn in the flag', group="returningflag")
+                self.moved_this_turn.add(bot.name)
                 break
 
+    @exit_except
     def tick(self):
         """Override this function for your own bots.  Here you can
         access all the information in self.game, which includes game
@@ -503,30 +544,38 @@ class ModusCommander(Commander):
         enemyFlagSpawn = self.game.enemyTeam.flagSpawnLocation  # NOQA
         alivebots = self.game.bots_alive  # NOQA
 
-        self.tickcount += 1
         ModusCommander.tickcount += 1
+        self.needsorders.clear()
 
-        self.needsorders = set()
+        if self.game.match.timeToNextRespawn > self.timetilnextrespawn:
+            self.respawn()
+        self.timetilnextrespawn = self.game.match.timeToNextRespawn
 
         self.processevents()
         self.clearthedead()
 
-        if self.game.match.timeToNextRespawn > self.timetilnextrespawn:
-            self.respawn()
-
-        self.timetilnextrespawn = self.game.match.timeToNextRespawn
+        # If a bot is defending but new order failed (firing or
+        # something) the bot will be stuck without orders forever
+        for bot in alivebots:
+            if bot.state == bot.STATE_DEFENDING and self.innogroups(bot):
+                self.log.warn("defending bot {} is in no groups!!!".format(bot.name))
+                self.giveneworders(bot)
+                # raw_input("Press Enter to continue...")
 
         self.seenenemies = self.getseenlivingenemies()
 
-        self.enemydefenders = [e for e in self.seenenemies if e.position.distance(enemyFlag) < self.level.firingDistance]
+        self.enemydefenders = [e for e in self.seenenemies if e.position.distance(enemyFlag) < self.level.firingDistance and e.state == e.STATE_DEFENDING]
 
-        self.enemyattackers = [e for e in self.seenenemies if e.position.distance(myFlag) < self.level.firingDistance * 2.0]
+        self.enemyattackers = [e for e in self.seenenemies if e.position.distance(myFlag) < self.level.firingDistance * 3.0]
 
-        self.moved_this_turn = []
+        self.moved_this_turn = set()
 
         for bot in self.game.bots_available:
-            self.needsorders.add(bot)
-            self.clearfromgroups(bot)
+            self.giveneworders(bot)
+            # self.needsorders.add(bot)
+            # self.clearfromgroups(bot)
+
+        self.order_flag_carrier()
 
         self.try_to_overpower()
 
@@ -541,7 +590,6 @@ class ModusCommander(Commander):
         # Stop attacking flag spawn
         self.reassign_when_flag_dropped()
 
-        self.order_flag_carrier()
         # rerun approch on waiting and attacking flag
         self.order_approachers()
         # for all bots which aren't currently doing anything
@@ -553,9 +601,7 @@ class ModusCommander(Commander):
             if bot.flag:
                 self.log.info("{} has flag this turn".format(bot.name))
                 # if a bot has the flag run to the scoring location
-                self.issuesafe(commands.Charge, bot, flagScoreLocation, description='Turn in the flag fail')
-                self.clearfromgroups(bot)
-                self.groups["returningflag"].append(bot)
+                self.issuesafe(commands.Charge, bot, flagScoreLocation, description='Turn in the flag fail', group="returningflag")
             if bot in self.groups["defenders"]:
                 self.log.info("{} is a defender".format(bot.name))
                 continue
