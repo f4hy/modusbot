@@ -23,8 +23,15 @@ def exit_except(fn):
 
 
 def anglebetween(v1, v2):
-    cos = v1.dotProduct(v2) / (v1.length() * v2.length())
-    angle = math.acos(cos)
+    try:
+        cos = v1.dotProduct(v2) / (v1.length() * v2.length())
+        angle = math.acos(cos)
+    except ZeroDivisionError:
+        return math.acos(0)
+    except ValueError:
+        return math.acos(0)
+    except Exception:
+        return math.acos(0)
     return angle
 
 
@@ -557,7 +564,11 @@ class ModusCommander(Commander):
             self.respawn()
         self.timetilnextrespawn = self.game.match.timeToNextRespawn
 
-        self.processevents()
+        try:
+            self.processevents()
+        except Exception:
+            self.log.error("Exception was thrown in processing events. Possibly malformed events")
+
         self.clearthedead()
 
         # If a bot is defending but new order failed (firing or
