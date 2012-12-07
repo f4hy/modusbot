@@ -2,9 +2,9 @@
 # implemented by looking at the commander.py in the ./api/ folder.
 from api import Commander
 from api import commands
+from api import Vector2
 import logging
 import sys
-import random
 import math
 import traceback
 
@@ -237,7 +237,6 @@ class ModusCommander(Commander):
 
     def defend(self, defender_bot):
         self.log.debug("defend({})".format(defender_bot.name))
-        primelist = [2, 3, 5, 7, 11]
         flag = self.game.team.flag.position
         mypos = defender_bot.position
         dist = defender_bot.position.distance(flag)
@@ -253,14 +252,27 @@ class ModusCommander(Commander):
             self.issuesafe(commands.Charge, defender_bot, goal, description='Get into position to defend', group="defenders")
         elif dist < self.level.firingDistance / 2.0:
             enemySpawn = self.enemySpawn
-            primetime = random.choice(primelist)
-            self.log.info("watching for primetime {}".format(primetime))
-            directionstolook = [(enemySpawn - mypos, random.choice(primelist)), (mypos - enemySpawn, 0.1)]
-            self.issuesafe(commands.Defend, defender_bot, facingDirection=directionstolook, description='defending', group="defending")
+            self.wiggledefend(defender_bot, enemySpawn - mypos, 'defending', "defending")
         else:
             goal = self.level.findNearestFreePosition(flag.midPoint(mypos))
             #self.issuesafe(commands.Attack, defender_bot, goal, lookAt=flag, description='Slow approach')
             self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach', group="defenders")
+
+    def vectorfromangle(self, theta):
+        return Vector2(math.cos(theta), math.sin(theta))
+
+    def angleofvector(self, v):
+        return anglebetween(v, Vector2(0.0, 0.0))
+
+    def rotatevector(self, v, theta):
+        newx = math.cos(theta) * v.x - math.sin(theta) * v.y
+        newy = math.sin(theta) * v.x + math.cos(theta) * v.y
+        return Vector2(newx, newy)
+
+    def wiggledefend(self, bot, direction, descript, grp, factor=3.5):
+        wiggleangle = self.level.FOVangle / factor
+        directions = [(self.rotatevector(direction, wiggleangle), 1.0), (self.rotatevector(direction, 0.0 - wiggleangle), 1.0)]
+        self.issuesafe(commands.Defend, bot, facingDirection=directions, description=descript, group=grp)
 
     def recoverflag(self, defender_bot):
         pass
@@ -286,9 +298,9 @@ class ModusCommander(Commander):
                 return
         else:
             direction = closestattacker.position - defender_bot.position
-            self.issuesafe(commands.Defend, defender_bot, facingDirection=direction,
-                           description='defending against attacker {}!'.format(closestattacker.name), group="aimatenemy")
             self.log.warn("pairing {} with {}".format(defender_bot.name, closestattacker.name))
+            self.wiggledefend(defender_bot, direction, 'defending against attacker {}!'.format(closestattacker.name),
+                              "aimatenemy", factor=8.0)
             self.pairs[defender_bot] = closestattacker
 
     def eyeonflag(self, watch_bot):
@@ -297,7 +309,7 @@ class ModusCommander(Commander):
         flag = self.game.team.flag.position
         mypos = watch_bot.position
         if watch_bot not in self.groups["watching"]:
-            self.issuesafe(commands.Defend, watch_bot, facingDirection=(flag - mypos), description='watching flag', group="watching")
+            self.wiggledefend(watch_bot, (flag - mypos), 'watching flag', "watching")
 
     def attack(self, attack_bot):
         self.log.debug("attack({})".format(attack_bot.name))
@@ -312,8 +324,7 @@ class ModusCommander(Commander):
         if self.captured():
             if attack_bot.position.distance(enemyFlagSpawn) < self.level.firingDistance / 3.0:
                 if attack_bot not in self.groups["flagspawn"]:
-                    self.issuesafe(commands.Defend, attack_bot, facingDirection=self.enemySpawn - mypos,
-                                   description='defending their flagspawn', group="flagspawn")
+                    self.wiggledefend(attack_bot, self.enemySpawn - mypos, 'defending their flagspawn', "flagspawn")
             else:
                 if attack_bot not in self.groups["chargingflagspawn"]:
                     self.issuesafe(commands.Attack, attack_bot, enemyFlagSpawn, lookAt=enemyFlagSpawn, description='Attack enemy flagspawn', group="chargingflagspawn")
@@ -375,7 +386,7 @@ class ModusCommander(Commander):
             if anglebetween(enemy.facingDirection, mypos - enemy.position) <= FOV and mypos.distance(enemy.position) > self.level.firingDistance:
                 self.log.debug("not attacking because of {}".format(enemy.name))
                 if attack_bot not in self.groups["waiting"]:
-                    self.issuesafe(commands.Defend, attack_bot, facingDirection=(enemy.position - mypos), description='Cant attack {}'.format(enemy.name), group="waiting")
+                    self.wiggledefend(attack_bot, (enemy.position - mypos), 'Cant attack {}'.format(enemy.name), "waiting", factor=5.0)
                     self.log.warn("pairing {} with {}".format(attack_bot.name, enemy.name))
                     self.pairs[attack_bot] = enemy
                     self.log.debug("waiting {}".format(attack_bot.name))
