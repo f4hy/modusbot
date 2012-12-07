@@ -288,7 +288,7 @@ class ModusCommander(Commander):
         closestattacker = getclosest(defender_bot.position, self.enemyattackers)
         if closestattacker is None:
             self.log.error("closest attacker none!")
-            exit(0)
+            # exit(0)
         if self.isinFOV(defender_bot, closestattacker.position) and defender_bot in self.groups["aimatenemy"]:
             return
 
