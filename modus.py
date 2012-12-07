@@ -636,11 +636,11 @@ class ModusCommander(Commander):
                 self.log.debug("{} being issued attack in 'order remaining'".format(bot.name))
                 self.attack(bot)
         if len(self.needsorders) > 0:
-            self.log.critical("failed to give all orders, should not happen!")
-            self.log.critical("groups %s", repr(self.groups))
+            self.log.warn("failed to give all orders, should not happen!")
+            self.log.warn("groups %s", repr(self.groups))
             for k, v in self.groups.iteritems():
-                self.log.critical("group key %s, value %s", k, repr([b.name for b in v]))
-            self.log.critical("needs orders list remaining %s", repr([bot.name for bot in self.needsorders]))
+                self.log.warn("group key %s, value %s", k, repr([b.name for b in v]))
+            self.log.warn("needs orders list remaining %s", repr([bot.name for bot in self.needsorders]))
             for bot in self.needsorders:
                 self.clearfromgroups(bot)
 
