@@ -181,12 +181,20 @@ class ModusCommander(Commander):
     def clearthedead(self):
         """ remove dead from the groups"""
         alivebots = self.game.bots_alive
+        for livingdead in [bot for bot in self.dead if bot.health > 0 and bot.seenlast == 0]:
+            self.log.error("Bot {} was proclaimed dead, but isnt. Healthy: {} ! seenlast {}".format(livingdead.name, livingdead.health, livingdead.seenlast))
+            raw_input("Press Enter to continue...")
         for g in self.groups.keys():
             self.groups[g] = set(bot for bot in self.groups[g] if bot in alivebots)
-        for deadbot in [bot for bot in self.allbots if bot not in self.dead and bot.health < 1 and bot.seenlast > 0]:
-            self.log.debug("clearing {} because of no health".format(deadbot.name))
-            self.dead.add(deadbot)
-            self.clearfromgroups(deadbot)
+
+        for deadbot in [bot for bot in self.mybots if (bot.health < 1.0 and bot not in self.dead)]:
+            self.log.error("alive bot {} was really dead. health: {}".format(deadbot.name, deadbot.health))
+            self.killed(deadbot)
+            raw_input("Press Enter to continue...")
+        for deadbot in [bot for bot in self.enemybots if (bot not in self.dead and bot.health < 1 and bot.seenlast == 0.0)]:
+            self.log.error("clearing {} because of no health".format(deadbot.name))
+            self.killed(deadbot)
+            raw_input("Press Enter to continue...")
 
     def clearpairs(self, bot):
         for k, v in self.pairs.items():
@@ -426,42 +434,53 @@ class ModusCommander(Commander):
         livingenemies = [e for e in enemies if e.health > 0]
         return set(livingenemies)
 
+    def killed(self, killedbot):
+        self.dead.add(killedbot)
+        self.clearpairs(killedbot)
+        if killedbot in self.mybots:
+            self.losscount += 1
+            self.clearfromgroups(killedbot)
+        else:
+            self.killcount += 1
+
+        killed_enemies = [bot for bot in self.enemybots if bot in self.dead]
+        killed_friendlies = [bot for bot in self.mybots if bot in self.dead]
+
+        if self.losscount != len(killed_friendlies):
+            raise Exception("killed friendlies doesn match loss count {} {}".format(self.losscount, len(killed_friendlies)))
+        if self.killcount != len(killed_enemies):
+            raise Exception("killed enemies doesn match kill count {} {}".format(self.killcount, len(killed_enemies)))
+
     def processevents(self):
         newevents = [e for e in self.game.match.combatEvents if e.time > self.timesincelastevent]
         if len(newevents) < 1:
             return              # do nothing if no new events
         self.timesincelastevent = max([x.time for x in self.game.match.combatEvents])
-
-        for e in [ev for ev in newevents if e.type == e.TYPE_KILLED]:
-            self.dead.add(e.subject)
+        print [e.type for e in newevents]
+        for e in [ev for ev in newevents if ev.type == ev.TYPE_KILLED]:
             if e.subject is None or e.instigator is None:
                 self.log.error("Error event actors are none subject:{}, instigator:{}".format(e.subject, e.instigator))
                 continue
-            self.clearpairs(e.subject)
             self.log.info("{} was killed by {}!".format(e.subject.name, e.instigator.name))
-            if e.instigator.team.name == self.game.team.name:
-                self.killcount += 1
-            else:
-                self.losscount += 1
-                self.log.debug("removing {} because died".format(e.subject.name))
-                self.clearfromgroups(e.subject)
+            self.killed(e.subject)
 
         self.log.info("kills: {kill}/{tot}, Losses {loss}/{tot}".format(kill=self.killcount, loss=self.losscount,
                                                                         tot=self.numberofbots))
 
-        for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_PICKEDUP]:
+        for e in [ev for ev in newevents if ev.type == ev.TYPE_FLAG_PICKEDUP]:
             self.log.info("{} pickedup the flag!".format(e.instigator.name))
 
-        for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_RESTORED]:
+        for e in [ev for ev in newevents if ev.type == ev.TYPE_FLAG_RESTORED]:
             self.log.info("flag restored!")
             for bot in self.groups["defenders"].copy():
                 self.giveneworders(bot)
-        for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_CAPTURED]:
+        for e in [ev for ev in newevents if ev.type == ev.TYPE_FLAG_CAPTURED]:
             self.log.info("flag CAPTURED!")
             for bot in self.groups["flagcutoff"].union(self.groups["flagchaser"]).copy():
                 self.giveneworders(bot)
-        for e in [ev for ev in newevents if e.type == e.TYPE_FLAG_DROPPED]:
-            self.log.info("flag dropped!")
+        for e in [ev for ev in newevents if ev.type == ev.TYPE_FLAG_DROPPED]:
+            self.log.info("flag dropped subject: {} inst: {}!".format(e.subject.name, e.instigator.name))
+            self.log.info("flag dropped by {}!".format(e.subject.name))
             for bot in self.groups["flagcutoff"].union(self.groups["flagchaser"]).copy():
                 self.giveneworders(bot)
 
