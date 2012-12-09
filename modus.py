@@ -195,6 +195,17 @@ class ModusCommander(Commander):
                 del self.pairs[k]
                 self.giveneworders(k)
 
+    def checkforbadpairs(self):
+        for k, v in self.pairs.items():
+            if k in self.dead or v in self.dead:
+                self.log.error("member of key pair {} : {} found in dead!".format(k.name, v.name))
+                print [b.name for b in self.dead]
+                raw_input("Press Enter to continue...")
+            if k.health < 1 or v.health < 1:
+                self.log.error("member of key pair {} : {} found without health!".format(k.name, v.name))
+                self.log.error("healths. {} : {}".format(k.health, v.health))
+                raw_input("Press Enter to continue...")
+
     def giveneworders(self, bot):
         self.log.debug("give new orders %s", bot.name)
         self.clearfromgroups(bot)
@@ -583,6 +594,8 @@ class ModusCommander(Commander):
             self.log.error("Exception was thrown in processing events. Possibly malformed events")
 
         self.clearthedead()
+
+        self.checkforbadpairs()
 
         # If a bot is defending but new order failed (firing or
         # something) the bot will be stuck without orders forever
