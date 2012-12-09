@@ -103,6 +103,8 @@ class ModusCommander(Commander):
 
         self.dead = set()
         self.allbots = self.game.bots.values()
+        self.mybots = [bot for bot in self.game.bots.values() if bot.team == self.game.team]
+        self.enemybots = [bot for bot in self.game.bots.values() if bot.team != self.game.team]
 
         self.enemyfullD = False
 
