@@ -349,7 +349,7 @@ class ModusCommander(Commander):
         if self.numberofdefenders != newnumberofdefenders:
             self.log.info("number of defendersz changed {} to {}, re-adjusting".format(self.numberofdefenders,
                                                                                        newnumberofdefenders))
-            for bot in self.groups["defending"]:
+            for bot in self.groups["defending"].copy():
                 self.defend(bot)
         self.numberofdefenders = newnumberofdefenders
         myFlag = self.game.team.flag.position
