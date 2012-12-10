@@ -521,6 +521,7 @@ class ModusCommander(Commander):
     def killed(self, killedbot):
         self.dead.add(killedbot)
         self.clearpairs(killedbot)
+        self.needsorders.discard(killedbot)
         if killedbot in self.mybots:
             self.losscount += 1
             self.clearfromgroups(killedbot)
@@ -742,7 +743,7 @@ class ModusCommander(Commander):
 
     def order_remaining(self):
         flagScoreLocation = self.game.team.flagScoreLocation
-        for bot in list(self.needsorders):
+        for bot in [b for b in self.needsorders if (b not in self.dead)]:
             if bot.flag:
                 self.log.info("{} has flag this turn".format(bot.name))
                 # if a bot has the flag run to the scoring location
@@ -758,6 +759,7 @@ class ModusCommander(Commander):
             self.log.warn("groups %s", repr(self.groups))
             for k, v in self.groups.iteritems():
                 self.log.warn("group key %s, value %s", k, repr([b.name for b in v]))
+            self.log.warn("deadbots %s", repr([bot.name for bot in self.dead]))
             self.log.warn("needs orders list remaining %s", repr([bot.name for bot in self.needsorders]))
             for bot in self.needsorders:
                 self.clearfromgroups(bot)
