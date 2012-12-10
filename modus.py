@@ -123,9 +123,15 @@ class ModusCommander(Commander):
             self.groups["defending"].add(bot)
         self.groups[group].add(bot)
 
-    def issuesafe(self, command, bot, target=None, facingDirection=None, lookAt=None, description=None, group=None):
+    def issuesafe(self, command, bot, target=None, facingDirection=None, lookAt=None, description=None, group=None, safe=True):
+        if bot in self.dead:
+            raise Exception("deadbot {} issued an order!".format("bot.name"))
+
         if target:
-            safetarget = self.level.findNearestFreePosition(target)
+            if safe:
+                safetarget = self.level.findNearestFreePosition(target)
+            else:
+                safetarget = target
 
         self.needsorders.discard(bot)
         if bot.name in self.moved_this_turn:
@@ -396,7 +402,7 @@ class ModusCommander(Commander):
             self.log.debug("inch closer {}".format(attack_bot.name))
             if self.groups["waiting"]:
                 goal = getclosest(mypos, self.groups["waiting"]).position
-                self.issuesafe(commands.Charge, attack_bot, goal, lookAt=enemyFlag, description='Join fellow attacker', group="attacking")
+                self.issuesafe(commands.Charge, attack_bot, goal, lookAt=enemyFlag, description='Join fellow attacker', group="attacking", safe=False)
             else:
                 safedistance = mypos.distance(getclosest(mypos, self.enemydefenders).position) - self.level.firingDistance
                 distancetogo = safedistance / 2.0 if safedistance / 2.0 > 1.0 else 1.0
