@@ -160,6 +160,66 @@ class ModusCommander(Commander):
         elif command == commands.Defend:
             self.issue(commands.Defend, bot, facingDirection, description)
 
+    def blockinfo(self, v):
+        cx = int(math.ceil(v.x))
+        cy = int(math.ceil(v.y))
+        fx = int(math.floor(v.x))
+        fy = int(math.floor(v.y))
+        max_x = self.level.area[1].x
+        max_y = self.level.area[1].y
+        fxfy = self.level.blockHeights[fx][fy] if (0 < fx < max_x and 0 < fy < max_y) else 5
+        cxfy = self.level.blockHeights[cx][fy] if (0 < cx < max_x and 0 < fy < max_y) else 5
+        fxcy = self.level.blockHeights[fx][cy] if (0 < fx < max_x and 0 < cy < max_y) else 5
+        cxcy = self.level.blockHeights[cx][cy] if (0 < cx < max_x and 0 < cy < max_y) else 5
+        return (fxfy, cxfy,
+                fxcy, cxcy)
+
+    def isinablock(self, v, vision=True):
+        if vision:
+            return all(p > 1 for p in self.blockinfo(v))
+        else:
+            return all(p > 0 for p in self.blockinfo(v))
+
+    def isawall(self, v, vision=True):
+        if vision:
+            count = len([p for p in self.blockinfo(v) if p > 1])
+        else:
+            count = len([p for p in self.blockinfo(v) if p > 0])
+        return count == 2
+
+    def walldirection(self, v, vision=True):
+        if not self.isawall(v):
+            self.log.error("asked direction of a wall which was not a wall!")
+            raise Exception
+        bi = self.blockinfo(v)
+        raw_input("Press Enter to continue...")
+        if bi[0] == bi[1] > 1:
+            return Vector2.UNIT_Y
+        if bi[0] == bi[2] > 1:
+            return Vector2.UNIT_X
+        if bi[3] == bi[2] > 1:
+            return Vector2.NEGATIVE_UNIT_Y
+        if bi[3] == bi[1] > 1:
+            return Vector2.NEGATIVE_UNIT_X
+
+    def nearestwall(self, v, maxrange=None, vision=True):
+        if self.isawall(v):
+            return(v)
+        if maxrange is None:
+            maxrange = self.level.firingDistance
+        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y]
+        distance = 0.0
+        while distance < maxrange:
+            points = [(v + direction * distance, direction) for direction in directions]
+            for p, d in points:
+                if self.isawall(p):
+                    return p + (d * 0.3)
+                if self.isinablock(p):
+                    del directions[points.index(p)]
+                    continue
+            distance += 0.2
+        return None
+
     def isinFOV(self, viewer, spot):
         angle = anglebetween(viewer.facingDirection, spot - viewer.position)
         return angle < self.level.FOVangle  # - (math.pi / 12)  # Dont count edges of FOV, 15 degrees here
@@ -265,25 +325,24 @@ class ModusCommander(Commander):
     def defend(self, defender_bot):
         self.log.debug("defend({})".format(defender_bot.name))
         flag = self.game.team.flag.position
-        mypos = defender_bot.position
-        dist = defender_bot.position.distance(flag)
 
         if self.theyhaveourflag():
             self.recoverflag(defender_bot)
             return
 
+        defendspot = self.nearestwall(flag)
+        print "defendspot", defendspot
+        if defendspot is None:
+            defendspot = flag
+        dist = defender_bot.position.distance(defendspot)
         if dist > self.level.firingDistance + 1.0:
-            # direction = flag.midPoint(defender_bot.position)-flag
-            # goal = flag+flag.midPoint(defender_bot.position).normalized()*(self.level.firingDistance+1.0)
-            goal = self.level.findNearestFreePosition(flag.midPoint(defender_bot.position))
+            goal = self.level.findNearestFreePosition(defendspot.midPoint(defender_bot.position))
             self.issuesafe(commands.Charge, defender_bot, goal, description='Get into position to defend', group="defenders")
-        elif dist < self.level.firingDistance / 2.0:
-            enemySpawn = self.enemySpawn
-            self.wiggledefend(defender_bot, enemySpawn - mypos, 'defending', "defending")
+        elif dist < 0.2:
+            self.flagdefend(defender_bot)
         else:
-            goal = self.level.findNearestFreePosition(flag.midPoint(mypos))
-            #self.issuesafe(commands.Attack, defender_bot, goal, lookAt=flag, description='Slow approach')
-            self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach', group="defenders")
+            goal = defendspot
+            self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach', group="defenders", safe=False)
 
     def vectorfromangle(self, theta):
         return Vector2(math.cos(theta), math.sin(theta))
@@ -300,6 +359,25 @@ class ModusCommander(Commander):
         wiggleangle = self.level.FOVangle / factor
         directions = [(self.rotatevector(direction, wiggleangle), 1.0), (self.rotatevector(direction, 0.0 - wiggleangle), 1.0)]
         self.issuesafe(commands.Defend, bot, facingDirection=directions, description=descript, group=grp)
+
+    def flagdefend(self, defender_bot):
+        mypos = defender_bot.position
+        direction = self.enemySpawn - mypos
+        if self.isawall(mypos):
+            self.log.warn("using wall direction!")
+            direction = self.walldirection(mypos)
+            print "wall direction is", direction
+            defenderangle = (self.level.FOVangle * (2.0 / 3.0))
+            print "angle to look", self.rotatevector(direction, math.pi/2.0 - defenderangle/2.0) , self.rotatevector(direction, -(math.pi/2.0 - defenderangle/2.0))
+            raw_input("Press Enter to continue...")
+            directions = [(self.rotatevector(direction, math.pi/2.0 - defenderangle/2.0), 1.0), (self.rotatevector(direction, -(math.pi/2.0 - defenderangle/2.0)), 1.0)]
+        else:
+            self.log.warn("Not at a wall!")
+            print "mypos", mypos
+            print self.blockinfo(mypos)
+            raw_input("Press Enter to continue...")
+            directions = [(direction, 1.0), (-direction, 1.0)]
+        self.issuesafe(commands.Defend, defender_bot, facingDirection=directions, description="defending", group="defending")
 
     def recoverflag(self, defender_bot):
         pass
@@ -648,11 +726,11 @@ class ModusCommander(Commander):
 
         self.hunt()
 
-        self.react_to_attackers()
+        # self.react_to_attackers()
         self.react_to_defenders()
 
         self.set_defenders()
-        self.set_flagwatcher()
+        # self.set_flagwatcher()
 
         # Stop attacking flag spawn
         self.reassign_when_flag_dropped()
