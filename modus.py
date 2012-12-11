@@ -137,7 +137,7 @@ class ModusCommander(Commander):
 
         if target:
             if safe:
-                safetarget = self.level.findNearestFreePosition(target)
+                safetarget = self.findFree(target)
             else:
                 safetarget = target
 
@@ -283,7 +283,7 @@ class ModusCommander(Commander):
 
     def findFree(self, v):
         target = v
-        for r in range(1, 20):
+        for r in range(1, 50):
             scale = self.level.characterRadius / 2.0
             areaMin = Vector2(target.x - r * scale, target.y - r * scale)
             areaMax = Vector2(target.x + r * scale, target.y + r * scale)
@@ -425,7 +425,7 @@ class ModusCommander(Commander):
             defendspot = flag
         dist = defender_bot.position.distance(defendspot)
         if dist > self.level.firingDistance + 1.0:
-            goal = self.level.findNearestFreePosition(defendspot.midPoint(defender_bot.position))
+            goal = self.findFree(defendspot.midPoint(defender_bot.position))
             goal = defendspot
             self.issuesafe(commands.Charge, defender_bot, goal, description='Get into position to defend', group="defenders")
         elif dist < 0.5:
@@ -574,13 +574,13 @@ class ModusCommander(Commander):
         trialdistance = distance
         while(not done):
             goal = frompos + ((topos - frompos).normalized()) * trialdistance
-            goal = self.level.findNearestFreePosition(goal)
+            goal = self.findFree(goal)
             if frompos.distance(goal) > progress and goal.distance(topos) < frompos.distance(topos):
                 return goal
             else:
                 trialdistance = trialdistance + 0.5
                 self.log.debug("trialdistance %d", trialdistance)
-        return self.level.findNearestFreePosition(topos)  # Should never get here
+        return self.findFree(topos)  # Should never get here
 
     def approachflag(self, attack_bot):
         self.log.debug("approachflag({})".format(attack_bot.name))
