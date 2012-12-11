@@ -133,7 +133,7 @@ class ModusCommander(Commander):
 
     def issuesafe(self, command, bot, target=None, facingDirection=None, lookAt=None, description=None, group=None, safe=True):
         if bot in self.dead:
-            raise Exception("deadbot {} issued an order!".format("bot.name"))
+            self.log.error("deadbot {} issued an order!".format("bot.name"))
 
         if target:
             if safe:
@@ -241,7 +241,6 @@ class ModusCommander(Commander):
     def walldirection(self, v, vision=True):
         if not self.isawall(v):
             self.log.error("asked direction of a wall which was not a wall!")
-            raise Exception
         bi = [2 if e > 1 else 0 for e in self.blockinfo(v)]
         if bi[0] == bi[1] > 1:
             return Vector2.UNIT_Y
@@ -486,15 +485,14 @@ class ModusCommander(Commander):
                     return
                 else:
                     self.log.error("Invalid defender number! {}".format(defendernumber))
-                    raise Exception
+                    return
             elif self.numberofdefenders == 0:
                 self.log.error("why is this called with no defenders?")
                 self.clearfromgroups(defender_bot)
-                raise Exception
                 return
             else:
                 self.log.error("Invalid num defenders! {}".format(self.numberofdefenders))
-                raise Exception
+                return
         else:
             self.log.warn("Not at a wall!")
             print self.blockinfo(mypos)
@@ -644,9 +642,9 @@ class ModusCommander(Commander):
         killed_friendlies = [bot for bot in self.mybots if bot in self.dead]
 
         if self.losscount != len(killed_friendlies):
-            raise Exception("killed friendlies doesn match loss count {} {}".format(self.losscount, len(killed_friendlies)))
+            self.log.error("killed friendlies doesn match loss count {} {}".format(self.losscount, len(killed_friendlies)))
         if self.killcount != len(killed_enemies):
-            raise Exception("killed enemies doesn match kill count {} {}".format(self.killcount, len(killed_enemies)))
+            self.log.error("killed enemies doesn match kill count {} {}".format(self.killcount, len(killed_enemies)))
 
     def processevents(self):
         newevents = [e for e in self.game.match.combatEvents if e.time > self.timesincelastevent]
