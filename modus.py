@@ -7,6 +7,7 @@ import logging
 import sys
 import math
 import traceback
+from collections import deque
 
 
 def exit_except(fn):
@@ -76,7 +77,7 @@ class ModusCommander(Commander):
         self.log.addHandler(stdoutloghandler)
 
         self.seenodefenders = True
-        self.groups = {"defenders": set(), "returningflag": set(), "defending": set(), "watching": set(), "overpower": set(),
+        self.groups = {"defenders": set(), "returningflag": set(), "defending": set(), "defendone": set(), "defendtwo": set(), "watching": set(), "overpower": set(),
                        "waiting": set(), "charging": set(), "attackingflag": set(), "aimatenemy": set(), "attacking": set(),
                        "flagspawn": set(), "chargingflagspawn": set(), "hunting": set(), "flagchaser": set(), "flagcutoff": set()}
 
@@ -110,7 +111,8 @@ class ModusCommander(Commander):
 
         self.lastaimtime = 0.0
 
-        self.defendspot = self.nearestwall(self.game.team.flagSpawnLocation)
+        self.defendspot = self.towards(self.breadthfirstsearch(self.game.team.flagSpawnLocation, self.iswall, self.level.firingDistance),
+                                       self.game.team.flagSpawnLocation, self.level.characterRadius)
 
         self.maxnumberofdefenders = 2
         if self.game.bots_alive < 3:
@@ -122,11 +124,11 @@ class ModusCommander(Commander):
     def addtogroup(self, bot, group):
         self.clearfromgroups(bot)
         self.log.debug("Adding {} to group {}".format(bot.name, group))
-        if group in ["defending", "watching", "aimatenemy"]:
+        if group in ["defending", "watching", "aimatenemy", "defendone", "defendtwo"]:
             self.log.debug("adding {} to defenders because adding to {}".format(bot.name, group))
             self.groups["defenders"].add(bot)
-        # if group in ["watching", "aimatenemy"]:
-        #     self.groups["defending"].add(bot)
+        if group in ["watching", "aimatenemy", "defendone", "defendtwo"]:
+            self.groups["defending"].add(bot)
         self.groups[group].add(bot)
 
     def issuesafe(self, command, bot, target=None, facingDirection=None, lookAt=None, description=None, group=None, safe=True):
@@ -149,10 +151,7 @@ class ModusCommander(Commander):
             return
         if bot.state is bot.STATE_TAKINGORDERS:
             self.log.warn("WARNING: reissuing order to {}, {}, {}".format(bot.name, command, description))
-            for g ,v in self.groups.items():
-                if bot in v:
-                    print g, [m.name for m in v]
-            # return
+            return
 
         self.log.info("Issuing {} command {}".format(bot.name, description))
         self.currentcommand[bot] = {"command": command, "target": target, "facingDirection": facingDirection,
@@ -189,6 +188,49 @@ class ModusCommander(Commander):
         else:
             return all(p > 0 for p in self.blockinfo(v))
 
+    def block(self, v):
+        max_x = self.level.area[1].x
+        max_y = self.level.area[1].y
+        if 0 < v.x < max_x and 0 < v.y < max_y:
+            return self.level.blockHeights[int(v.x)][int(v.y)]
+        else:
+            return 5
+
+    def iswall(self, v):
+        if self.block(v) < 2:
+            return False
+        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y,
+                      Vector2.UNIT_SCALE, -Vector2.UNIT_SCALE,  # diagonals
+                      Vector2.UNIT_X - Vector2.UNIT_Y, Vector2.UNIT_Y - Vector2.UNIT_X]  # Other diagonals
+
+        neighbors = [v + d for d in directions]
+        blocks = [n for n in neighbors if self.block(n) > 1]
+        return len(blocks) == 5
+
+    def isinside(self, v):
+        if self.block(v) < 2:
+            return False
+        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y,
+                      Vector2.UNIT_SCALE, -Vector2.UNIT_SCALE,  # diagonals
+                      Vector2.UNIT_X - Vector2.UNIT_Y, Vector2.UNIT_Y - Vector2.UNIT_X]  # Other diagonals
+
+        neighbors = [v + d for d in directions]
+        blocks = [n for n in neighbors if self.block(n) > 1]
+        return len(blocks) == 8
+
+    def directiontowall(self, v):
+        wall = self.breadthfirstsearch(v, self.iswall, self.level.firingDistance)
+        return (v - wall).normalized()
+
+    def nearestwall(self, v):
+        return self.breadthfirstsearch(v, self.iswall, self.level.firingDistance * 10)
+
+    def wallface(self, v):
+        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y]
+        for d in directions:
+            if self.block(v + d) < 1:
+                return d
+
     def isawall(self, v, vision=True):
         if vision:
             count = len([p for p in self.blockinfo(v) if p > 1])
@@ -201,8 +243,6 @@ class ModusCommander(Commander):
             self.log.error("asked direction of a wall which was not a wall!")
             raise Exception
         bi = [2 if e > 1 else 0 for e in self.blockinfo(v)]
-        print "bi", bi
-        # raw_input("Press Enter to continue...")
         if bi[0] == bi[1] > 1:
             return Vector2.UNIT_Y
         if bi[0] == bi[2] > 1:
@@ -212,39 +252,46 @@ class ModusCommander(Commander):
         if bi[3] == bi[1] > 1:
             return Vector2.NEGATIVE_UNIT_X
 
-    def nearestwall(self, v, maxrange=None, vision=True):
-        if self.isawall(v):
-            return(v)
-        if maxrange is None:
-            maxrange = self.level.firingDistance
+    def breadthfirstsearch(self, starting, testfunction, maxdistance):
+
+        checked = []
         directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y]
-        distance = 0.0
-        while distance < maxrange:
-            points = [(v + direction * distance, direction) for direction in directions]
-            for p, d in points:
-                print p, d, self.blockinfo(p)
-                if self.isawall(p):
-                    # return self.level.findNearestFreePosition(p + (d * 0.3))
-                    print "p", p
-                    print self.blockinfo(p)
-                    print self.isinablock(p)
-                    print p + (d * 0.3)
-                    target = p
-                    for r in range(1, 10):
-                        print r
-                        areaMin = Vector2(target.x - r/10.0, target.y - r/10.0)
-                        areaMax = Vector2(target.x + r/10.0, target.y + r/10.0)
-                        position = self.level.findRandomFreePositionInBox((areaMin, areaMax))
-                        if position:
-                            for _ in range(20):
-                                if self.isawall(position):
-                                    return position
-                if self.isinablock(p):
-                    print directions
-                    print d
-                    directions.remove(d)
-                    continue
-            distance += 0.2
+
+        #directions = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+
+        startX, startY = int(starting.x), int(starting.y)
+
+        def ivec(v):
+            return Vector2(int(v.x), int(v.y))
+
+        queue = deque()
+        queue.append(ivec(starting))
+        checked.append(ivec(starting))
+
+        while queue:
+            tobetested = queue.popleft()
+            if testfunction(tobetested):
+                return tobetested
+            for d in reversed(directions):
+                step = ivec(tobetested + d)
+                if step not in checked and self.isinside(step) < 2 and step.distance(starting) < maxdistance:
+                    checked.append(step)
+                    queue.append(step)
+
+        self.log.error("breadthfirstsearch failed!")
+        return None
+
+    def findFree(self, v):
+        target = v
+        for r in range(1, 20):
+            scale = self.level.characterRadius / 2.0
+            areaMin = Vector2(target.x - r * scale, target.y - r * scale)
+            areaMax = Vector2(target.x + r * scale, target.y + r * scale)
+            for _ in range(10):
+                position = self.level.findRandomFreePositionInBox((areaMin, areaMax))
+                if position:
+                    self.log.debug("findFree had to search out to {}".format(r))
+                    return position
         return None
 
     def isinFOV(self, viewer, spot):
@@ -278,18 +325,15 @@ class ModusCommander(Commander):
         alivebots = self.game.bots_alive
         for livingdead in [bot for bot in self.dead if bot.health > 0 and bot.seenlast == 0]:
             self.log.error("Bot {} was proclaimed dead, but isnt. Healthy: {} ! seenlast {}".format(livingdead.name, livingdead.health, livingdead.seenlast))
-            raw_input("Press Enter to continue...")
         for g in self.groups.keys():
             self.groups[g] = set(bot for bot in self.groups[g] if bot in alivebots)
 
         for deadbot in [bot for bot in self.mybots if (bot.health < 1.0 and bot not in self.dead)]:
             self.log.error("alive bot {} was really dead. health: {}".format(deadbot.name, deadbot.health))
             self.killed(deadbot)
-            raw_input("Press Enter to continue...")
         for deadbot in [bot for bot in self.enemybots if (bot not in self.dead and bot.health < 1 and bot.seenlast == 0.0)]:
             self.log.error("clearing {} because of no health".format(deadbot.name))
             self.killed(deadbot)
-            raw_input("Press Enter to continue...")
 
     def clearpairs(self, bot):
         self.log.debug("clear {} from pairs ".format(bot.name))
@@ -304,12 +348,9 @@ class ModusCommander(Commander):
         for k, v in self.pairs.items():
             if k in self.dead or v in self.dead:
                 self.log.error("member of key pair {} : {} found in dead!".format(k.name, v.name))
-                print [b.name for b in self.dead]
-                raw_input("Press Enter to continue...")
             if k.health < 1 or v.health < 1:
                 self.log.error("member of key pair {} : {} found without health!".format(k.name, v.name))
                 self.log.error("healths. {} : {}".format(k.health, v.health))
-                raw_input("Press Enter to continue...")
 
     def checkforbadaims(self):
         self.log.debug("check bad pairs")
@@ -347,13 +388,18 @@ class ModusCommander(Commander):
     def set_defenders(self):
         newnumberofdefenders = self.setnumberofdefenders()
         if self.numberofdefenders != newnumberofdefenders:
-            self.log.info("number of defendersz changed {} to {}, re-adjusting".format(self.numberofdefenders,
+            self.log.warn("number of defendersz changed {} to {}, re-adjusting".format(self.numberofdefenders,
                                                                                        newnumberofdefenders))
             for bot in self.groups["defending"].copy():
-                self.defend(bot)
+                if newnumberofdefenders > self.numberofdefenders:
+                    self.numberofdefenders = newnumberofdefenders
+                    self.giveneworders(bot)
+                else:
+                    self.numberofdefenders = newnumberofdefenders
+                    self.defend(bot)
+
         self.numberofdefenders = newnumberofdefenders
         myFlag = self.game.team.flag.position
-        print [b.name for b in self.needsorders]
         if self.needsorders and len(self.groups["defenders"]) < self.numberofdefenders:
             while len(self.groups["defenders"]) < self.numberofdefenders:
                 potentialdefenders = [b for b in self.needsorders if b not in self.groups["defenders"]]
@@ -375,7 +421,7 @@ class ModusCommander(Commander):
             return
 
         defendspot = self.defendspot
-        if self.defendspot is None or flag.distance(self.game.team.flagSpawnLocation) > 1.0 :
+        if self.defendspot is None or flag.distance(self.game.team.flagSpawnLocation) > 1.0:
             defendspot = flag
         dist = defender_bot.position.distance(defendspot)
         if dist > self.level.firingDistance + 1.0:
@@ -386,7 +432,6 @@ class ModusCommander(Commander):
             self.flagdefend(defender_bot)
         else:
             goal = defendspot
-            print "goal", goal
             self.issuesafe(commands.Charge, defender_bot, goal, lookAt=flag, description='Approach', group="defenders", safe=False)
 
     def vectorfromangle(self, theta):
@@ -408,40 +453,53 @@ class ModusCommander(Commander):
     def flagdefend(self, defender_bot):
         mypos = defender_bot.position
         direction = self.enemySpawn - mypos
-        if self.isawall(mypos):
-            self.log.warn("using wall direction!")
-            direction = self.walldirection(mypos)
-            print "wall direction is", direction
+        # if self.iswall(mypos):
+        if mypos.distance(self.nearestwall(mypos)) < 2.0:
+            self.log.info("using wall direction!")
+            direction = self.wallface(self.nearestwall(mypos))
             defenderangle = (self.level.FOVangle * (1.8 / 3.0))
             halfpi = math.pi / 2.0
             if self.numberofdefenders == 1:
-                print "angle to look", self.rotatevector(direction, halfpi - defenderangle / 2.0), self.rotatevector(direction, -(halfpi - defenderangle / 2.0))
-                # raw_input("Press Enter to continue...")
                 directions = [(self.rotatevector(direction, halfpi - defenderangle / 2.0), 1.0), (self.rotatevector(direction, -(halfpi - defenderangle / 2.0)), 1.0)]
+                self.issuesafe(commands.Defend, defender_bot, facingDirection=directions, description="solo defending", group="defending")
+                return
             elif self.numberofdefenders == 2:
-                if len(self.groups["defending"]) == 0:
-                    self.log.info("I {} am first defender ".format(defender_bot.name))
-                    directions = [(self.rotatevector(direction, halfpi - defenderangle / 2.0), 1.0), (self.rotatevector(direction,  defenderangle / 2.0), 1.0)]
-                elif len(self.groups["defending"]) == 1:
-                    self.log.info("I {} am second defender ".format(defender_bot.name))
-                    directions = [(self.rotatevector(direction, -(halfpi - defenderangle / 2.0)), 1.0), (self.rotatevector(direction, -defenderangle / 2.0), 1.0)]
+                defendernumber = 0
+                if defender_bot in self.groups["defendone"]:
+                    defendernumber = 1
+                elif defender_bot in self.groups["defendtwo"]:
+                    defendernumber = 2
+                elif self.groups["defendone"]:
+                    defendernumber = 2
                 else:
-                    self.log.error("Invalid current defenders! {}".format(len(self.groups["defending"])))
+                    defendernumber = 1
+                # Now run the command for the correc defender
+                if defendernumber == 1:
+                    self.log.info("I {} am first defender ".format(defender_bot.name))
+                    directions = [(self.rotatevector(direction, halfpi - defenderangle / 2.5), 1.0), (self.rotatevector(direction,  defenderangle / 2.0), 1.0)]
+                    self.issuesafe(commands.Defend, defender_bot, facingDirection=directions, description="defend_one", group="defendone")
+                    return
+                elif defendernumber == 2:
+                    self.log.info("I {} am second defender ".format(defender_bot.name))
+                    directions = [(self.rotatevector(direction, -(halfpi - defenderangle / 2.5)), 1.0), (self.rotatevector(direction, -defenderangle / 2.0), 1.0)]
+                    self.issuesafe(commands.Defend, defender_bot, facingDirection=directions, description="defend_two", group="defendtwo")
+                    return
+                else:
+                    self.log.error("Invalid defender number! {}".format(defendernumber))
                     raise Exception
             elif self.numberofdefenders == 0:
                 self.log.error("why is this called with no defenders?")
                 self.clearfromgroups(defender_bot)
+                raise Exception
+                return
             else:
                 self.log.error("Invalid num defenders! {}".format(self.numberofdefenders))
                 raise Exception
         else:
             self.log.warn("Not at a wall!")
-            print "mypos", mypos
             print self.blockinfo(mypos)
-            exit()
-            # raw_input("Press Enter to continue...")
-            directions = [(direction, 1.0), (-direction, 1.0)]
-        self.issuesafe(commands.Defend, defender_bot, facingDirection=directions, description="defending", group="defending")
+            directions = [(direction, 2.0), (-direction, 1.0)]
+            self.issuesafe(commands.Defend, defender_bot, facingDirection=directions, description="defending", group="defending")
 
     def recoverflag(self, defender_bot):
         pass
@@ -451,30 +509,6 @@ class ModusCommander(Commander):
             self.issuesafe(commands.Charge, defender_bot, flag, description="Chasing flag!", group="flagchaser")
         else:
             self.issuesafe(commands.Attack, defender_bot, self.game.enemyTeam.flagScoreLocation, lookAt=flag, description="Cut off flag!", group="flagcutoff")
-
-    def aimatenemy(self, defender_bot):
-        self.log.debug("aimatenemy({})".format(defender_bot.name))
-        unaimedattackers = [b for b in self.enemyattackers if b not in self.pairs.values()]
-        if len(unaimedattackers) < 1:
-            return
-        closestattacker = getclosest(defender_bot.position, unaimedattackers)
-        if closestattacker is None:
-            self.log.error("closest attacker none!")
-            # exit(0)
-        if self.isinFOV(defender_bot, closestattacker.position) and defender_bot in self.groups["aimatenemy"]:
-            return
-
-        if defender_bot in self.groups["aimatenemy"]:
-            if defender_bot.facingDirection != self.currentcommand[defender_bot]["facingDirection"]:
-                self.log.warn("has not aimed yet")
-                return
-        else:
-            direction = closestattacker.position - defender_bot.position
-            self.log.warn("pairing {} with {}".format(defender_bot.name, closestattacker.name))
-            self.lastaimtime = self.game.match.timePassed
-            self.wiggledefend(defender_bot, direction, 'defending against attacker {}!'.format(closestattacker.name),
-                              "aimatenemy", factor=8.0)
-            self.pairs[defender_bot] = closestattacker
 
     def eyeonflag(self, watch_bot):
         if self.groups["watching"]:
@@ -509,8 +543,8 @@ class ModusCommander(Commander):
                 first, second = self.game.team.botSpawnArea
                 if first.x <= mypos.x <= second.x and first.x <= mypos.x <= second.x:
                     goal = self.towards(mypos, enemyFlag, self.level.firingDistance)
-                    look = self.towards(mypos, enemyFlag, self.level.firingDistance*2)
-                    self.issuesafe(commands.Attack, attack_bot, goal, lookAt=goal, description='Charge enemy flag', group="charging")
+                    look = self.towards(mypos, enemyFlag, self.level.firingDistance * 2)
+                    self.issuesafe(commands.Attack, attack_bot, goal, lookAt=look, description='Charge enemy flag', group="charging")
                 else:
                     self.issuesafe(commands.Charge, attack_bot, goal, description='Charge enemy flag', group="charging")
         else:
@@ -529,7 +563,11 @@ class ModusCommander(Commander):
 
     def towards(self, frompos, topos, distance=1.0):
         goal = frompos + ((topos - frompos).normalized()) * distance
-        return self.level.findNearestFreePosition(goal)
+        return self.findFree(goal)
+
+    def towardsunsafe(self, frompos, topos, distance=1.0):
+        goal = frompos + ((topos - frompos).normalized()) * distance
+        return goal
 
     def towards_require_progress(self, frompos, topos, distance=1.0, progress=1.0):
         done = False
@@ -695,19 +733,46 @@ class ModusCommander(Commander):
             if len(self.groups["waiting"]) > len(self.enemydefenders) - notlooking:
                 self.overpowerall()
 
+    def aimatenemy(self, defender_bot):
+        self.log.warn("aimatenemy({})".format(defender_bot.name))
+        looked_at = set(self.pairs[k] for k in self.groups["aimatenemy"] if k in self.pairs.keys())
+        potential = set(defender_bot.visibleEnemies).difference(looked_at).difference(self.dead)
+        closest = getclosest(defender_bot.position, potential)
+        direction = closest.position - defender_bot.position
+        self.log.warn("pairing {} with {}".format(defender_bot.name, closest.name))
+        self.lastaimtime = self.game.match.timePassed
+        self.wiggledefend(defender_bot, direction, 'defending against attacker {}!'.format(closest.name),
+                          "aimatenemy", factor=8.0)
+        self.pairs[defender_bot] = closest
+
     def react_to_attackers(self):
-        unaimedattackers = [b for b in self.enemyattackers if b not in self.pairs.values()]
-        if len(unaimedattackers) > 0:
-            for bot in list(self.groups["defending"]):
-                self.aimatenemy(bot)
-            # for bot in list(self.groups["defending"])[len(self.enemyattackers):]:
-            #     self.aimatenemy(bot)
-        else:
-            if self.game.match.timePassed > self.lastaimtime + 2.0:
-                for bot in list(self.groups["aimatenemy"]):
-                    self.log.debug("no attackers, clear aimers")
+        for bot in self.groups["defending"]:
+            if bot not in self.groups["aimatenemy"].copy():
+                looked_at = set(self.pairs[k] for k in self.groups["aimatenemy"] if k in self.pairs.keys())
+                potentialvisible = set(bot.visibleEnemies).difference(looked_at).difference(self.dead)
+                inrange = [b for b in potentialvisible if b.position.distance(bot.position) < self.level.firingDistance * 2.0]
+                movingslow = [b for b in inrange if b.state in (b.STATE_DEFENDING, b.STATE_IDLE, b.STATE_ATTACKING, b.STATE_TAKINGORDERS, b.STATE_SHOOTING)]
+                if movingslow:
+                    self.aimatenemy(bot)
+
+        for bot in self.groups["aimatenemy"].copy():
+            aimed_enemy = self.pairs[bot]
+            if aimed_enemy in bot.visibleEnemies:
+                self.lastaimtime = self.game.match.timePassed
+            else:
+                if aimed_enemy in self.dead:
+                    self.log.debug("attacker has died clear")
+                    self.clearfromgroups(bot)
                     self.defend(bot)
-                    self.moved_this_turn.add(bot.name)
+                elif (aimed_enemy.position.distance(bot.position) < self.level.firingDistance * 1.5
+                      and aimed_enemy.seenlast < 2.0 and bot.facingDirection == self.currentcommand[bot]["facingDirection"]):
+                    self.log.debug("look to where aimed enemy was last seen")
+                    self.issuesafe(commands.Defend, bot, facingDirection=aimed_enemy.position - bot.position,
+                                   description='defending against last known attacker {}!'.format(aimed_enemy.name), group=None)
+                elif self.game.match.timePassed > self.lastaimtime + 2.0:
+                    self.log.debug("can no longer see attacker")
+                    self.clearfromgroups(bot)
+                    self.defend(bot)
 
     def set_flagwatcher(self):
         if len(self.groups["defending"]) < 1:
@@ -791,11 +856,10 @@ class ModusCommander(Commander):
 
         self.enemydefenders = [e for e in self.seenenemies if e.position.distance(enemyFlag) < self.level.firingDistance and e.state == e.STATE_DEFENDING]
 
-        self.enemyattackers = [e for e in self.seenenemies if e.position.distance(myFlag) < self.level.firingDistance * 3.0]
+        self.enemyattackers = [e for e in self.seenenemies if e.position.distance(myFlag) < self.level.firingDistance * 2.0]
 
         self.moved_this_turn = set()
 
-        print "availible", [bot.name for bot in self.game.bots_available]
         for bot in self.game.bots_available:
             self.giveneworders(bot)
             # self.needsorders.add(bot)
