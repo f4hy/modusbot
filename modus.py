@@ -168,26 +168,6 @@ class ModusCommander(Commander):
         elif command == commands.Defend:
             self.issue(commands.Defend, bot, facingDirection, description)
 
-    def blockinfo(self, v):
-        cx = int(math.ceil(v.x))
-        cy = int(math.ceil(v.y))
-        fx = int(math.floor(v.x))
-        fy = int(math.floor(v.y))
-        max_x = self.level.area[1].x
-        max_y = self.level.area[1].y
-        fxfy = self.level.blockHeights[fx][fy] if (0 < fx < max_x and 0 < fy < max_y) else 5
-        cxfy = self.level.blockHeights[cx][fy] if (0 < cx < max_x and 0 < fy < max_y) else 5
-        fxcy = self.level.blockHeights[fx][cy] if (0 < fx < max_x and 0 < cy < max_y) else 5
-        cxcy = self.level.blockHeights[cx][cy] if (0 < cx < max_x and 0 < cy < max_y) else 5
-        return (fxfy, cxfy,
-                fxcy, cxcy)
-
-    def isinablock(self, v, vision=True):
-        if vision:
-            return all(p > 1 for p in self.blockinfo(v))
-        else:
-            return all(p > 0 for p in self.blockinfo(v))
-
     def block(self, v):
         max_x = self.level.area[1].x
         max_y = self.level.area[1].y
@@ -230,26 +210,6 @@ class ModusCommander(Commander):
         for d in directions:
             if self.block(v + d) < 1:
                 return d
-
-    def isawall(self, v, vision=True):
-        if vision:
-            count = len([p for p in self.blockinfo(v) if p > 1])
-        else:
-            count = len([p for p in self.blockinfo(v) if p > 0])
-        return count == 2
-
-    def walldirection(self, v, vision=True):
-        if not self.isawall(v):
-            self.log.error("asked direction of a wall which was not a wall!")
-        bi = [2 if e > 1 else 0 for e in self.blockinfo(v)]
-        if bi[0] == bi[1] > 1:
-            return Vector2.UNIT_Y
-        if bi[0] == bi[2] > 1:
-            return Vector2.UNIT_X
-        if bi[3] == bi[2] > 1:
-            return Vector2.NEGATIVE_UNIT_Y
-        if bi[3] == bi[1] > 1:
-            return Vector2.NEGATIVE_UNIT_X
 
     def breadthfirstsearch(self, starting, testfunction, maxdistance):
 
@@ -495,7 +455,6 @@ class ModusCommander(Commander):
                 return
         else:
             self.log.warn("Not at a wall!")
-            print self.blockinfo(mypos)
             directions = [(direction, 2.0), (-direction, 1.0)]
             self.issuesafe(commands.Defend, defender_bot, facingDirection=directions, description="defending", group="defending")
 
