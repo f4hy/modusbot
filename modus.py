@@ -220,6 +220,15 @@ class ModusCommander(Commander):
             if self.block(v + d) < 1:
                 return d
 
+    def findall(self, testfunction):
+        start, end =  self.level.area
+        found = []
+        for x in range(int(start.x), int(end.x)):
+            for y in range(int(start.y), int(end.y)):
+                if testfunction(Vector2(x,y)):
+                    found.append(Vector2(x,y))
+        return found
+
     def breadthfirstsearch(self, starting, testfunction, maxdistance):
         checked = []
         startX, startY = int(starting.x), int(starting.y)
