@@ -174,9 +174,8 @@ class ModusCommander(Commander):
             self.issue(commands.Defend, bot, facingDirection, description)
 
     def block(self, v):
-        max_x = self.level.area[1].x
-        max_y = self.level.area[1].y
-        if 0 < v.x < max_x and 0 < v.y < max_y:
+        min_v, max_v = self.level.area
+        if min_v.x <= v.x < max_v.x and min_v.y <= v.y < max_v.y:
             return self.level.blockHeights[int(v.x)][int(v.y)]
         else:
             return 5
