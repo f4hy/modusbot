@@ -194,6 +194,29 @@ class ModusCommander(Commander):
         blocks = [n for n in neighbors if self.block(n) > 1]
         return len(blocks) == 7
 
+    def iscorridor(self, v):
+        # print "is corridor?", v
+
+        if self.block(v) > 1:
+            return False
+        directions = [Vector2.UNIT_X, Vector2.UNIT_Y]
+        for d in directions:
+            # print (d, -d), self.block(v + d), self.block(v - d)
+            # print self.block(v + d) > 1, self.block(v - d) > 1
+            if (self.block(v + d) > 1) != (self.block(v - d) > 1):
+                return False
+
+        if (self.block(v + Vector2.UNIT_X) < 1) and (self.block(v + Vector2.UNIT_Y) < 1):
+            return False
+        if (self.block(v + Vector2.UNIT_X) > 1) and (self.block(v + Vector2.UNIT_Y) > 1):
+            return False
+        if (self.block(v + Vector2.UNIT_X) > 1) == (self.block(v + Vector2.UNIT_Y) > 1):
+            return False
+
+        # print self.block(v + Vector2.UNIT_X), self.block(v + Vector2.UNIT_Y)
+        # exit()
+        return True
+
     def isinside(self, v):
         if self.block(v) < 2:
             return False
@@ -220,12 +243,12 @@ class ModusCommander(Commander):
                 return d
 
     def findall(self, testfunction):
-        start, end =  self.level.area
+        start, end = self.level.area
         found = []
         for x in range(int(start.x), int(end.x)):
             for y in range(int(start.y), int(end.y)):
-                if testfunction(Vector2(x,y)):
-                    found.append(Vector2(x,y))
+                if testfunction(Vector2(x, y)):
+                    found.append(Vector2(x, y))
         return found
 
     def breadthfirstsearch(self, starting, testfunction, maxdistance):
