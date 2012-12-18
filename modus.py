@@ -94,6 +94,12 @@ class ModusCommander(Commander):
         self.attackcount = 0
         self.log.info("Modusbots are %s", repr([b.name for b in self.game.bots_alive]))
 
+        corridor = self.findall(self.iscorridor)
+        print "corridor", corridor
+
+        self.twowidecorridor(first)
+        exit()
+
         self.numberofbots = len(self.game.bots_alive)
 
         self.events = self.game.match.combatEvents
@@ -195,14 +201,10 @@ class ModusCommander(Commander):
         return len(blocks) == 7
 
     def iscorridor(self, v):
-        # print "is corridor?", v
-
         if self.block(v) > 1:
             return False
         directions = [Vector2.UNIT_X, Vector2.UNIT_Y]
         for d in directions:
-            # print (d, -d), self.block(v + d), self.block(v - d)
-            # print self.block(v + d) > 1, self.block(v - d) > 1
             if (self.block(v + d) > 1) != (self.block(v - d) > 1):
                 return False
 
@@ -212,10 +214,15 @@ class ModusCommander(Commander):
             return False
         if (self.block(v + Vector2.UNIT_X) > 1) == (self.block(v + Vector2.UNIT_Y) > 1):
             return False
-
-        # print self.block(v + Vector2.UNIT_X), self.block(v + Vector2.UNIT_Y)
-        # exit()
         return True
+
+    def twowidecorridor(self, v):
+
+        stencil = [(x, y) for x in range(-2, 2) for y in range(-2, 2)]
+        print stencil
+
+    def rotate_cw(self, matrix):
+        return zip(*matrix[::-1])
 
     def isinside(self, v):
         if self.block(v) < 2:
