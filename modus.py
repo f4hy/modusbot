@@ -86,6 +86,11 @@ class ModusCommander(Commander):
 
         self.timetilnextrespawn = self.game.match.timeToNextRespawn
 
+        self.cardinals = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y]
+        self.diagonals = [Vector2.UNIT_SCALE, -Vector2.UNIT_SCALE,
+                          Vector2.UNIT_X - Vector2.UNIT_Y, Vector2.UNIT_Y - Vector2.UNIT_X]
+        self.directions = self.cardinals + self.diagonals
+
         self.attackcount = 0
         self.log.info("Modusbots are %s", repr([b.name for b in self.game.bots_alive]))
 
@@ -179,22 +184,21 @@ class ModusCommander(Commander):
     def iswall(self, v):
         if self.block(v) < 2:
             return False
-        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y,
-                      Vector2.UNIT_SCALE, -Vector2.UNIT_SCALE,  # diagonals
-                      Vector2.UNIT_X - Vector2.UNIT_Y, Vector2.UNIT_Y - Vector2.UNIT_X]  # Other diagonals
-
-        neighbors = [v + d for d in directions]
+        neighbors = [v + d for d in self.directions]
         blocks = [n for n in neighbors if self.block(n) > 1]
         return len(blocks) == 5
+
+    def iscorner(self, v):
+        if self.block(v) < 2:
+            return False
+        neighbors = [v + d for d in self.directions]
+        blocks = [n for n in neighbors if self.block(n) > 1]
+        return len(blocks) == 7
 
     def isinside(self, v):
         if self.block(v) < 2:
             return False
-        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y,
-                      Vector2.UNIT_SCALE, -Vector2.UNIT_SCALE,  # diagonals
-                      Vector2.UNIT_X - Vector2.UNIT_Y, Vector2.UNIT_Y - Vector2.UNIT_X]  # Other diagonals
-
-        neighbors = [v + d for d in directions]
+        neighbors = [v + d for d in self.directions]
         blocks = [n for n in neighbors if self.block(n) > 1]
         return len(blocks) == 8
 
@@ -206,18 +210,18 @@ class ModusCommander(Commander):
         return self.breadthfirstsearch(v, self.iswall, self.level.firingDistance * 10)
 
     def wallface(self, v):
-        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y]
-        for d in directions:
+        for d in self.cardinals:
+            if self.block(v + d) < 1:
+                return d
+
+    def cornerface(self, v):
+        assert(self.iscorner(v))
+        for d in self.directions:
             if self.block(v + d) < 1:
                 return d
 
     def breadthfirstsearch(self, starting, testfunction, maxdistance):
-
         checked = []
-        directions = [Vector2.UNIT_X, Vector2.UNIT_Y, Vector2.NEGATIVE_UNIT_X, Vector2.NEGATIVE_UNIT_Y]
-
-        #directions = [(1, 0), (0, 1), (-1, 0), (0, -1)]
-
         startX, startY = int(starting.x), int(starting.y)
 
         def ivec(v):
@@ -231,7 +235,7 @@ class ModusCommander(Commander):
             tobetested = queue.popleft()
             if testfunction(tobetested):
                 return tobetested
-            for d in reversed(directions):
+            for d in self.cardinals:
                 step = ivec(tobetested + d)
                 if step not in checked and self.isinside(step) < 2 and step.distance(starting) < maxdistance:
                     checked.append(step)
